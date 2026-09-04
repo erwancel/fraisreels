@@ -67,6 +67,41 @@ L'écran d'accueil affiche un avertissement dès que la dernière sauvegarde rem
 
 ---
 
+## Import automatique
+
+### Roster
+
+**Séjours → Importer un roster**, puis sélectionne le PDF de ton planning individuel
+(NetLine/Crew). L'app en extrait tes nuits hors domicile et reconstitue les séjours.
+
+La règle appliquée : **une nuit compte lorsque le planning porte une ligne hôtel** (`H1 DUS`,
+`H2 VIE`…). C'est le seul indice fiable. Un roster affiche souvent ta base contractuelle pendant
+tes jours de repos alors que tu es rentré chez toi — sur le planning d'août 2026, les dix jours
+`O_S PRG` du 15 au 24 n'ont aucun hébergement associé : ils ne sont pas comptés.
+
+Les nuits consécutives au même endroit sont regroupées en un seul séjour. Un séjour par nuit
+gonflerait le forfait d'escale, qui accorde une demi-indemnité de retour par séjour.
+
+Avant d'importer, renseigne dans les réglages les **aéroports de logement en base**
+(par exemple `DUS`). Les nuits qui s'y déroulent seront classées en présence en base plutôt qu'en
+escale : elles relèvent de la double résidence, pas du courrier. Sans ce réglage, tout est traité
+en escale.
+
+Un écran de prévisualisation montre ce qui a été détecté avant enregistrement. Les séjours déjà
+présents ne sont pas dupliqués. La ville n'est pas renseignée, seul le pays compte.
+
+### Bulletin de paie
+
+**Revenus → Importer un bulletin PDF**. Plusieurs fichiers peuvent être sélectionnés d'un coup.
+L'app relève les lignes `/106`, `/350`, `/360`, `202F`, `/401` et `/559`, en **additionnant toutes
+les périodes** de chaque code — c'est précisément l'étape où la saisie manuelle échoue.
+
+Le recoupement avec le virement est vérifié avant l'enregistrement et affiché dans la
+prévisualisation. Un bulletin sans taux de change reprend celui d'un autre mois. Réimporter un mois
+déjà présent le met à jour sans perdre le justificatif ni la mention d'impôt contesté.
+
+Les PDF sont lus sur l'appareil. Aucun document n'est transmis.
+
 ## Utilisation
 
 **Saisir une dépense.** Bouton `+`, montant, poste, photo du ticket. Les photos sont réduites à
@@ -81,7 +116,7 @@ immédiatement. Les taux se modifient dans les réglages, une ligne par devise a
 **Remboursé par l'employeur.** Cocher la case exclut la ligne du total déductible tout en gardant la
 trace de la dépense.
 
-**Séjours.** Chaque rotation ou période en base se saisit avec ses dates. Le décompte des jours par
+**Séjours.** Le plus simple est d'importer le roster. Sinon, chaque rotation se saisit avec ses dates. Le décompte des jours par
 pays se construit tout seul, sans compter deux fois une journée passée dans deux pays.
 
 **Revenus.** Le module bulletin est calé sur le format Eurowings Europe Ltd. Cinq lignes à recopier :

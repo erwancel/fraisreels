@@ -201,6 +201,7 @@ const SETTINGS_DEFAULTS = {
   name: '',
   home: '',
   base: '',
+  baseAirports: '',
   vfl: false,
   theme: 'auto',
   rates: { CHF: 1.06, GBP: 1.17, USD: 0.92, PLN: 0.23, CZK: 0.0413, DKK: 0.134,

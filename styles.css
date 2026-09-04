@@ -56,9 +56,44 @@
   }
 }
 
-/* Forçage manuel du thème depuis les réglages */
-html[data-theme="dark"]  { color-scheme: dark; }
-html[data-theme="light"] { color-scheme: light; }
+/* Forçage manuel du thème depuis les réglages.
+   Le media query ne suffit pas : il faut redéfinir les variables,
+   sinon changer le réglage ne modifie aucune couleur. */
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --bg:        #0F1620;
+  --surface:   #17202C;
+  --surface-2: #1E2937;
+  --line:      #2A3646;
+  --line-soft: #212C3A;
+  --ink:       #E7ECF3;
+  --ink-2:     #97A5B8;
+  --ink-3:     #64748B;
+  --brass:     #D4AF37;
+  --brass-dim: #8A7220;
+  --gain:      #56B392;
+  --warn:      #E08B5E;
+  --loss:      #D9614C;
+  --shadow:    0 1px 0 rgba(255,255,255,.03), 0 8px 24px rgba(0,0,0,.35);
+}
+
+html[data-theme="light"] {
+  color-scheme: light;
+  --bg:        #EFF2F6;
+  --surface:   #FFFFFF;
+  --surface-2: #F5F7FA;
+  --line:      #D4DBE4;
+  --line-soft: #E4E9EF;
+  --ink:       #0E1620;
+  --ink-2:     #4A5768;
+  --ink-3:     #74839A;
+  --brass:     #8A6D0F;
+  --brass-dim: #C4A94E;
+  --gain:      #1F7A5C;
+  --warn:      #A85A26;
+  --loss:      #B23B28;
+  --shadow:    0 1px 2px rgba(16,24,40,.06), 0 8px 20px rgba(16,24,40,.08);
+}
 
 * { box-sizing: border-box; }
 
@@ -479,7 +514,38 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
   outline: 2px solid var(--brass);
   outline-offset: 2px;
 }
-input[type="checkbox"] { width: 20px; height: 20px; min-height: 20px; accent-color: var(--brass); }
+input[type="checkbox"] {
+  /* La règle générique ci-dessus efface le rendu natif : on le redessine. */
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  min-height: 22px;
+  padding: 0;
+  border: 1.5px solid var(--ink-3);
+  border-radius: 6px;
+  background: var(--surface-2);
+  position: relative;
+  cursor: pointer;
+  transition: background .12s ease, border-color .12s ease;
+}
+input[type="checkbox"]:checked {
+  background: var(--brass);
+  border-color: var(--brass);
+}
+input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 7px;
+  top: 3px;
+  width: 5px;
+  height: 10px;
+  border: solid #14100A;
+  border-width: 0 2.5px 2.5px 0;
+  transform: rotate(45deg);
+}
+input[type="checkbox"]:active { transform: scale(.92); }
 
 .amount-input {
   font-family: var(--font-num);

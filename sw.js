@@ -3,7 +3,7 @@
    Change CACHE_VERSION à chaque déploiement pour forcer la mise à jour.
    =========================================================== */
 
-const CACHE_VERSION = 'frais-reels-v4';
+const CACHE_VERSION = 'frais-reels-v5';
 
 // Coquille de l'application : mise en cache dès l'installation.
 const SHELL = [
@@ -12,6 +12,7 @@ const SHELL = [
   './styles.css',
   './store.js',
   './exports.js',
+  './import.js',
   './app.js',
   './manifest.webmanifest',
   './icons/icon-192.png',
@@ -24,7 +25,9 @@ const SHELL = [
 const EXTERNAL = [
   'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js',
   'https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js',
-  'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js'
+  'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js',
+  'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js',
+  'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js'
 ];
 
 self.addEventListener('install', (event) => {

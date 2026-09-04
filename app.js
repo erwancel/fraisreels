@@ -860,6 +860,7 @@ function openSettings() {
   $('#st-name').value  = settings.name || '';
   $('#st-home').value  = settings.home || '';
   $('#st-base').value  = settings.base || '';
+  $('#st-base-airports').value = settings.baseAirports || '';
   $('#st-abat-min').value = b.min;
   $('#st-abat-max').value = b.max;
   $('#st-vfl').checked = !!settings.vfl;
@@ -890,6 +891,7 @@ async function saveSettings() {
   await saveSetting('name', $('#st-name').value.trim());
   await saveSetting('home', $('#st-home').value.trim());
   await saveSetting('base', $('#st-base').value.trim());
+  await saveSetting('baseAirports', $('#st-base-airports').value.trim().toUpperCase());
   await saveSetting('vfl', $('#st-vfl').checked);
   await saveSetting('theme', $('#st-theme').value);
   await saveSetting('rates', textToRates($('#st-rates').value));
@@ -914,8 +916,19 @@ async function saveSettings() {
 
 function applyTheme() {
   const t = settings.theme || 'auto';
-  document.documentElement.dataset.theme = t === 'auto' ? '' : t;
-  if (t === 'auto') document.documentElement.removeAttribute('data-theme');
+  if (t === 'auto') {
+    document.documentElement.removeAttribute('data-theme');
+  } else {
+    document.documentElement.setAttribute('data-theme', t);
+  }
+  // La barre d'état iOS suit la couleur de fond réellement appliquée
+  const dark = t === 'dark' ||
+    (t === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  document.querySelectorAll('meta[name="theme-color"]').forEach(m => m.remove());
+  const meta = document.createElement('meta');
+  meta.name = 'theme-color';
+  meta.content = dark ? '#0F1620' : '#EFF2F6';
+  document.head.appendChild(meta);
 }
 
 /* ===========================================================
@@ -987,6 +1000,229 @@ async function runBackup(button) {
 }
 
 /* ===========================================================
+   Imports PDF
+   =========================================================== */
+
+let pendingImport = null;    // { kind, apply() }
+
+function baseAirports() {
+  return (settings.baseAirports || '').toUpperCase().split(/[\s,;]+/).filter(Boolean);
+}
+
+async function importRoster(file, button) {
+  const label = button.textContent;
+  button.textContent = 'Lecture du PDF…';
+  try {
+    const items = await pdfItems(file);
+    const roster = parseRoster(items);
+
+    if (!roster.nights.length) {
+      toast('Aucune nuit d\'escale détectée dans ce planning.', 4000);
+      return;
+    }
+
+    const trips = nightsToTrips(roster.nights, baseAirports());
+    const existing = await db.all('trips');
+
+    // Un séjour déjà présent au même départ et au même endroit ne sera pas dupliqué
+    const seen = new Set(existing.map(t => `${t.start}|${t.country}`));
+    const fresh = trips.filter(t => !seen.has(`${t.start}|${t.country}`));
+    const dupes = trips.length - fresh.length;
+
+    const byCountry = {};
+    for (const t of trips) byCountry[t.country] = (byCountry[t.country] || 0) + t.nights;
+
+    pendingImport = {
+      kind: 'roster',
+      apply: async () => {
+        for (const t of fresh) {
+          await db.put('trips', {
+            id: uid(),
+            start: t.start,
+            end: t.end,
+            year: yearOf(t.start),
+            country: t.country,
+            city: '',
+            purpose: t.purpose,
+            nights: t.nights,
+            notes: `Importé du roster — escale ${t.place}`,
+            updatedAt: Date.now()
+          });
+        }
+        return `${fresh.length} séjour${fresh.length > 1 ? 's' : ''} ajouté${fresh.length > 1 ? 's' : ''}.`;
+      }
+    };
+
+    const totalNights = trips.reduce((s, t) => s + t.nights, 0);
+    $('#import-title').textContent = 'Roster détecté';
+    $('#import-body').innerHTML = `
+      <div class="stats" style="margin-bottom:14px">
+        <div class="stat"><span class="label">Nuits hors domicile</span><span class="value">${totalNights}</span><div class="sub">${roster.daysDetected} jours lus</div></div>
+        <div class="stat"><span class="label">Séjours reconstitués</span><span class="value">${trips.length}</span><div class="sub">${dupes ? `${dupes} déjà présents` : 'aucun doublon'}</div></div>
+      </div>
+
+      <table class="grid" style="margin-bottom:14px">
+        <thead><tr><th>Période</th><th>Lieu</th><th class="num">Nuits</th><th>Nature</th></tr></thead>
+        <tbody>${trips.map(t => `
+          <tr>
+            <td class="num" style="font-size:.78rem">${t.start.slice(8)}/${t.start.slice(5, 7)}</td>
+            <td>${escapeHtml(COUNTRY_BY_CODE[t.country] || t.country)} <span class="flag">${t.place}</span></td>
+            <td class="num">${t.nights}</td>
+            <td style="font-size:.75rem;color:var(--ink-3)">${t.purpose === 'base' ? 'en base' : 'escale'}</td>
+          </tr>`).join('')}
+        </tbody>
+        <tfoot><tr><td colspan="2">Total</td><td class="num">${totalNights}</td><td></td></tr></tfoot>
+      </table>
+
+      <div class="notice">
+        Seules les nuits marquées par une ligne hôtel sont retenues. Les jours de repos affichés
+        à ta base contractuelle sans hébergement sont considérés comme passés à ton domicile.
+      </div>
+
+      ${roster.unknownPlaces.length ? `<div class="notice alert">
+        Codes d'aéroport inconnus : ${roster.unknownPlaces.join(', ')}. Ces séjours seront créés
+        en « Autre » — corrige le pays à la main ensuite.
+      </div>` : ''}
+
+      ${dupes ? `<div class="notice">${dupes} séjour${dupes > 1 ? 's' : ''} déjà enregistré${dupes > 1 ? 's' : ''} ${dupes > 1 ? 'seront ignorés' : 'sera ignoré'}.</div>` : ''}`;
+
+    $('#import-confirm').disabled = fresh.length === 0;
+    $('#import-confirm').textContent = fresh.length
+      ? `Enregistrer ${fresh.length} séjour${fresh.length > 1 ? 's' : ''}`
+      : 'Rien de nouveau à enregistrer';
+    openSheet('dlg-import');
+
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Lecture du planning impossible.', 5000);
+  } finally {
+    button.textContent = label;
+  }
+}
+
+async function importPayslips(files, button) {
+  const label = button.textContent;
+  const parsed = [];
+  const errors = [];
+
+  try {
+    for (const file of files) {
+      button.textContent = `Lecture de ${file.name}…`;
+      try {
+        parsed.push(parsePayslipPdf(await pdfItems(file)));
+      } catch (err) {
+        errors.push(`${file.name} : ${err.message}`);
+      }
+    }
+    if (!parsed.length) {
+      toast(errors[0] || 'Aucun bulletin lisible.', 5000);
+      return;
+    }
+
+    const existing = await db.all('payslips');
+    const byMonth = Object.fromEntries(existing.map(p => [p.month, p]));
+
+    pendingImport = {
+      kind: 'payslip',
+      apply: async () => {
+        for (const p of parsed) {
+          const previous = byMonth[p.month];
+          // Un bulletin sans taux reprend celui du mois le plus proche
+          const rate = p.rate
+            || previous?.rate
+            || parsed.find(o => o.rate)?.rate
+            || settings.rates[p.currency]
+            || 1;
+          await db.put('payslips', {
+            id: previous?.id || uid(),
+            month: p.month,
+            year: p.year,
+            employer: p.employer,
+            currency: p.currency,
+            rate,
+            totalCur: p.totalCur,
+            totalEur: p.totalEur,
+            taxableBase: p.taxableBase,
+            social: p.social,
+            allowance: p.allowance,
+            taxPaid: p.taxPaid,
+            taxDisputed: previous?.taxDisputed ?? false,
+            net: p.net,
+            source: previous?.source || 'CZ',
+            receiptIds: previous?.receiptIds || [],
+            updatedAt: Date.now()
+          });
+        }
+        return `${parsed.length} bulletin${parsed.length > 1 ? 's' : ''} enregistré${parsed.length > 1 ? 's' : ''}.`;
+      }
+    };
+
+    const monthName = (m) => {
+      const names = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+                     'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+      return `${names[Number(m.slice(5, 7)) - 1]} ${m.slice(0, 4)}`;
+    };
+
+    $('#import-title').textContent = parsed.length > 1 ? 'Bulletins détectés' : 'Bulletin détecté';
+    $('#import-body').innerHTML = parsed.map(p => `
+      <div class="panel" style="margin-bottom:12px">
+        <div class="panel-head">
+          <h2 style="text-transform:capitalize">${monthName(p.month)}</h2>
+          <span class="hint">${p.currency}${byMonth[p.month] ? ' · remplace l\'existant' : ''}</span>
+        </div>
+        <table class="grid">
+          <tbody>
+            <tr><td>Base imposable /106</td><td class="num">${num(p.taxableBase)}</td></tr>
+            <tr><td>Cotisations /350 + /360</td><td class="num">${num(p.social)}</td></tr>
+            <tr><td>Per diem 202F</td><td class="num">${num(p.allowance)}</td></tr>
+            <tr><td>Impôt /401</td><td class="num">${num(p.taxPaid)}</td></tr>
+            <tr><td>Virement /559</td><td class="num">${num(p.net)}</td></tr>
+          </tbody>
+        </table>
+        <p class="verdict-note" style="margin-top:10px;color:${p.check.ok ? 'var(--gain)' : 'var(--warn)'}">
+          ${p.check.ok
+            ? 'Recoupement correct avec le virement.'
+            : `Écart de ${num(Math.abs(p.check.diff))} ${p.currency} avec le virement — à vérifier après import.`}
+        </p>
+        <p class="verdict-note" style="margin-top:4px">
+          ${p.rate
+            ? `Taux du bulletin : 1 € = ${num(1 / p.rate, 3)} ${p.currency}. Base retenue : ${eur((p.taxableBase - p.social) * p.rate)}.`
+            : 'Pas de taux sur ce bulletin, celui d\'un autre mois sera repris.'}
+        </p>
+      </div>`).join('')
+      + (errors.length ? `<div class="notice alert">${errors.map(escapeHtml).join('<br>')}</div>` : '');
+
+    $('#import-confirm').disabled = false;
+    $('#import-confirm').textContent = `Enregistrer ${parsed.length} bulletin${parsed.length > 1 ? 's' : ''}`;
+    openSheet('dlg-import');
+
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Lecture du bulletin impossible.', 5000);
+  } finally {
+    button.textContent = label;
+  }
+}
+
+async function confirmImport() {
+  if (!pendingImport) return;
+  const btn = $('#import-confirm');
+  btn.disabled = true;
+  try {
+    const message = await pendingImport.apply();
+    pendingImport = null;
+    $('#dlg-import').close();
+    await rebuildYears();
+    await refresh();
+    toast(message, 3500);
+  } catch (err) {
+    console.error(err);
+    toast('Enregistrement impossible : ' + err.message);
+    btn.disabled = false;
+  }
+}
+
+/* ===========================================================
    Initialisation
    =========================================================== */
 
@@ -1038,6 +1274,19 @@ function bindEvents() {
   });
 
   $('#open-settings').addEventListener('click', openSettings);
+
+  // Imports PDF
+  $('#roster-file').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (file) await importRoster(file, $('label[for="roster-file"]'));
+    e.target.value = '';
+  });
+  $('#payslip-file').addEventListener('change', async (e) => {
+    const files = [...e.target.files];
+    if (files.length) await importPayslips(files, $('label[for="payslip-file"]'));
+    e.target.value = '';
+  });
+  $('#import-confirm').addEventListener('click', confirmImport);
   $('#add-trip').addEventListener('click', () => openTrip(null));
   $('#add-payslip').addEventListener('click', () => openPayslip(null));
   $('#add-revenue').addEventListener('click', () => openRevenue(null));
