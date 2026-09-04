@@ -1,2 +1,169 @@
-# fraisreels
-Système de suivis des frais réels
+# Carnet de frais réels
+
+Application web installable sur l'écran d'accueil de l'iPhone. Suivi des dépenses professionnelles
+avec justificatifs photographiés, décompte des jours par pays, suivi des revenus, et export annuel
+complet pour la déclaration.
+
+Tout est stocké sur l'appareil. Aucune donnée ne transite par un serveur.
+
+---
+
+## Fichiers
+
+```
+index.html                structure des 5 écrans
+styles.css                thème sombre et clair
+store.js                  base de données locale, référentiels, calculs
+exports.js                CSV, PDF, ZIP, sauvegarde
+app.js                    interface
+manifest.webmanifest      installation sur écran d'accueil
+sw.js                     fonctionnement hors ligne
+icons/                    icônes générées
+```
+
+---
+
+## Déploiement sur Cloudflare Pages
+
+1. Créer un dépôt GitHub et y pousser le contenu de ce dossier à la racine.
+2. Sur Cloudflare Pages : **Create a project → Connect to Git**, sélectionner le dépôt.
+3. Build command : laisser vide. Build output directory : `/`. Framework preset : `None`.
+4. Déployer.
+
+Le HTTPS est indispensable : sans lui, ni le service worker ni l'installation sur écran d'accueil
+ne fonctionnent. Cloudflare Pages le fournit automatiquement.
+
+À chaque modification, incrémenter `CACHE_VERSION` dans `sw.js` (`frais-reels-v1` → `v2`), sinon
+l'ancienne version reste servie depuis le cache.
+
+---
+
+## Installation sur iPhone
+
+1. Ouvrir l'adresse dans **Safari** (Chrome iOS ne sait pas installer de PWA).
+2. Bouton Partager → **Sur l'écran d'accueil**.
+3. Lancer l'app depuis l'icône : elle s'ouvre en plein écran, sans barre d'adresse.
+
+Premier réglage : ouvrir l'engrenage en haut à droite, renseigner le nom, le domicile et la base,
+puis appuyer sur **Protéger les données**. Cela demande à Safari de ne pas purger le stockage
+en cas d'inactivité prolongée.
+
+---
+
+## Sauvegarde vers iCloud
+
+Une application web ne peut pas écrire directement dans iCloud Drive sur iOS. Le circuit est donc :
+
+**Bilan → Sauvegarder vers iCloud** → la feuille de partage iOS s'ouvre → **Enregistrer dans Fichiers**
+→ choisir un dossier dans **iCloud Drive**.
+
+Le fichier produit contient tout : dépenses, séjours, bulletins, recettes, réglages et l'intégralité
+des photos. Un seul fichier à conserver.
+
+Pour restaurer sur un nouvel appareil : installer l'app, puis **Bilan → Restaurer une sauvegarde**
+et sélectionner le fichier depuis iCloud Drive.
+
+L'écran d'accueil affiche un avertissement dès que la dernière sauvegarde remonte à plus de 30 jours.
+
+---
+
+## Utilisation
+
+**Saisir une dépense.** Bouton `+`, montant, poste, photo du ticket. Les photos sont réduites à
+1600 px et compressées : un ticket pèse environ 150 Ko au lieu de 3 Mo.
+
+**Devises.** Si la dépense n'est pas en euros, choisir la devise : la conversion s'affiche
+immédiatement. Les taux se modifient dans les réglages, une ligne par devise au format `CHF=1.07`.
+
+**Quote-part.** Pour un abonnement téléphonique utilisé à 60 % professionnellement, indiquer 60 dans
+« quote-part professionnelle » : seule cette fraction entre dans le total déductible.
+
+**Remboursé par l'employeur.** Cocher la case exclut la ligne du total déductible tout en gardant la
+trace de la dépense.
+
+**Séjours.** Chaque rotation ou période en base se saisit avec ses dates. Le décompte des jours par
+pays se construit tout seul, sans compter deux fois une journée passée dans deux pays.
+
+**Revenus.** Le module bulletin est calé sur le format Eurowings Europe Ltd. Cinq lignes à recopier :
+
+| Champ de l'app | Ligne du bulletin |
+|---|---|
+| Total payment devise / EUR | en-tête, donne le taux de change du mois |
+| Base imposable | `/106 Eval.base tax` — additionner toutes les périodes affichées |
+| Cotisations salariales | `/350 HI part EE` + `/360 SI part EE` (jamais les lignes `part ER`) |
+| Per diem non imposable | `202F Travel tax free` |
+| Impôt payé sur place | `/401 Tax advance, monthly` |
+
+L'app convertit avec le taux du bulletin lui-même, plus défendable qu'un taux générique puisque le
+document en porte la trace, et calcule la base retenue pour la déclaration française :
+base imposable moins cotisations sociales obligatoires.
+
+Attention aux périodes : un bulletin d'août peut porter des montants rattachés à juillet
+(les `Service time payment` sont payées avec un mois de décalage). Il faut bien additionner
+toutes les périodes présentes sur le document.
+
+Les recettes Air One Aero se ventilent par catégorie fiscale.
+
+---
+
+## Export annuel
+
+**Bilan → Dossier complet (ZIP)** produit :
+
+```
+frais-reels-2026/
+  recapitulatif-2026.pdf          synthèse, détail par poste, pays, journal complet
+  depenses-2026.csv               tableau détaillé
+  sejours-2026.csv                séjours et décompte par pays
+  bulletins-2026.csv
+  recettes-2026.csv
+  justificatifs/
+    P001_2026-03-14_repas_diner-escale-palma_23,40eur.jpg
+    ...
+  bulletins/
+  factures/
+```
+
+Chaque justificatif porte un numéro de pièce qui correspond à la colonne « Pièce » du journal PDF.
+Le dossier se transmet tel quel à un comptable.
+
+---
+
+## Le comparateur
+
+L'écran d'accueil oppose deux montants :
+
+- l'**abattement forfaitaire de 10 %** appliqué automatiquement par l'administration sur le salaire
+  net imposable, entre un plancher et un plafond ;
+- le **total des frais réels** justifiés.
+
+Opter pour le réel n'a d'intérêt que si le second dépasse le premier. Les bornes de l'abattement
+sont réévaluées chaque année : elles se corrigent dans les réglages, année par année.
+
+Valeurs préchargées, à vérifier au moment de déclarer :
+
+| Revenus | Plancher | Plafond |
+|---------|---------|---------|
+| 2024    | 504 €   | 14 426 € |
+| 2025    | 509 €   | 14 555 € |
+| 2026    | 509 €   | 14 555 € (provisoire) |
+
+---
+
+## Limites connues
+
+Les codes de cases affichés dans l'écran Bilan sont indicatifs, celui du crédit d'impôt étranger
+en particulier. Un salaire versé par une compagnie maltaise depuis une base tchèque à un résident
+français relève d'une convention fiscale que l'application ne tranche pas : la base calculée est
+une estimation à faire valider par un fiscaliste spécialisé en personnel navigant.
+
+Le calcul retenu — base imposable locale moins cotisations sociales obligatoires — correspond à la
+pratique courante pour un salarié cotisant à un régime obligatoire d'un État membre de l'Union.
+Il ne préjuge pas du traitement des indemnités de déplacement, qui suivent des règles françaises
+propres et ne sont pas automatiquement exonérées du seul fait qu'elles le sont localement.
+
+En micro-entreprise, aucune charge n'est déductible du chiffre d'affaires. Les dépenses rattachées
+à Air One Aero sont suivies pour information et n'entrent jamais dans le total des frais réels.
+
+Les exports PDF et ZIP téléchargent trois bibliothèques au premier usage. Elles sont ensuite mises
+en cache et restent disponibles hors ligne. Faire un export une fois en Wi-Fi avant de partir.
