@@ -302,7 +302,7 @@ function renderTrips() {
       <button type="button" class="log-row" data-trip="${t.id}">
         <span class="log-date"><b>${day}</b>${month}</span>
         <span class="log-main">
-          <span class="log-label">${escapeHtml(COUNTRY_BY_CODE[t.country] || t.country)}${t.city ? ' — ' + escapeHtml(t.city) : ''}</span>
+          <span class="log-label">${escapeHtml(COUNTRY_BY_CODE[t.country] || t.country)}</span>
           <span class="log-meta">${escapeHtml(PURPOSES[t.purpose] || '')}<span class="dot"></span>${t.start.split('-').reverse().slice(0, 2).join('/') } → ${(t.end || t.start).split('-').reverse().slice(0, 2).join('/')}</span>
         </span>
         <span class="log-amount">${a.amount ? eur(a.amount) : days + ' j'}<small>${a.amount ? `${a.units} × ${eur0(a.rate)}` : `${nights} nuit${nights > 1 ? 's' : ''}`}</small></span>
@@ -619,7 +619,6 @@ function openTrip(trip) {
   $('#tr-start').value   = trip?.start || todayISO();
   $('#tr-end').value     = trip?.end || todayISO();
   $('#tr-country').value = trip?.country || 'DE';
-  $('#tr-city').value    = trip?.city || settings.base || '';
   $('#tr-purpose').value = trip?.purpose || 'rotation';
   $('#tr-notes').value   = trip?.notes || '';
   $('#tr-nights').value  = trip?.nights ?? autoNights();
@@ -645,7 +644,6 @@ async function saveTrip() {
     start, end,
     year: yearOf(start),
     country: $('#tr-country').value,
-    city: $('#tr-city').value.trim(),
     purpose: $('#tr-purpose').value,
     nights: Number($('#tr-nights').value) || 0,
     notes: $('#tr-notes').value.trim(),
@@ -758,11 +756,19 @@ function updatePayslipPreview() {
   }
 
   box.style.borderLeftColor = balance.checked && !balance.ok ? 'var(--warn)' : 'var(--gain)';
+
+  const dual = (v) => isEuro ? eur(v) : `${num(v)} ${cur} <span style="color:var(--ink-3)">/</span> ${eur(v * rate)}`;
+
   box.innerHTML = `
-    Base retenue pour la déclaration française : <strong>${eur(frenchBase)}</strong>
-    <br><span style="color:var(--ink-3)">${num(base)} − ${num(social)} = ${num(base - social)} ${cur}</span>
-    ${allowance ? `<br>Per diem non imposable : ${eur(allowance * rate)}` : ''}
-    ${tax ? `<br>Impôt payé sur place : ${eur(tax * rate)}` : ''}
+    <table class="grid" style="margin:-2px 0 0">
+      <tbody>
+        <tr><td>Base imposable</td><td class="num">${dual(base)}</td></tr>
+        <tr><td>Cotisations</td><td class="num">${dual(social)}</td></tr>
+        ${allowance ? `<tr><td>Per diem</td><td class="num">${dual(allowance)}</td></tr>` : ''}
+        ${tax ? `<tr><td>Impôt sur place</td><td class="num">${dual(tax)}</td></tr>` : ''}
+      </tbody>
+      <tfoot><tr><td>Base retenue pour la France</td><td class="num">${eur(frenchBase)}</td></tr></tfoot>
+    </table>
     ${verdict}`;
 }
 
@@ -1164,7 +1170,13 @@ async function importPayslips(files, button) {
     };
 
     $('#import-title').textContent = parsed.length > 1 ? 'Bulletins détectés' : 'Bulletin détecté';
-    $('#import-body').innerHTML = parsed.map(p => `
+    $('#import-body').innerHTML = parsed.map(p => {
+      // Le taux du bulletin sert à afficher chaque ligne dans les deux monnaies
+      const r = p.rate || byMonth[p.month]?.rate || parsed.find(o => o.rate)?.rate || settings.rates[p.currency] || 0;
+      const dual = (v) => r
+        ? `${num(v)} <span style="color:var(--ink-3)">/</span> ${num(v * r)} €`
+        : num(v);
+      return `
       <div class="panel" style="margin-bottom:12px">
         <div class="panel-head">
           <h2 style="text-transform:capitalize">${monthName(p.month)}</h2>
@@ -1172,12 +1184,13 @@ async function importPayslips(files, button) {
         </div>
         <table class="grid">
           <tbody>
-            <tr><td>Base imposable /106</td><td class="num">${num(p.taxableBase)}</td></tr>
-            <tr><td>Cotisations /350 + /360</td><td class="num">${num(p.social)}</td></tr>
-            <tr><td>Per diem 202F</td><td class="num">${num(p.allowance)}</td></tr>
-            <tr><td>Impôt /401</td><td class="num">${num(p.taxPaid)}</td></tr>
-            <tr><td>Virement /559</td><td class="num">${num(p.net)}</td></tr>
+            <tr><td>Base imposable /106</td><td class="num">${dual(p.taxableBase)}</td></tr>
+            <tr><td>Cotisations /350 + /360</td><td class="num">${dual(p.social)}</td></tr>
+            <tr><td>Per diem 202F</td><td class="num">${dual(p.allowance)}</td></tr>
+            <tr><td>Impôt /401</td><td class="num">${dual(p.taxPaid)}</td></tr>
+            <tr><td>Virement /559</td><td class="num">${dual(p.net)}</td></tr>
           </tbody>
+          <tfoot><tr><td>Base retenue pour la France</td><td class="num">${dual(p.taxableBase - p.social)}</td></tr></tfoot>
         </table>
         <p class="verdict-note" style="margin-top:10px;color:${p.check.ok ? 'var(--gain)' : 'var(--warn)'}">
           ${p.check.ok
@@ -1186,10 +1199,11 @@ async function importPayslips(files, button) {
         </p>
         <p class="verdict-note" style="margin-top:4px">
           ${p.rate
-            ? `Taux du bulletin : 1 € = ${num(1 / p.rate, 3)} ${p.currency}. Base retenue : ${eur((p.taxableBase - p.social) * p.rate)}.`
-            : 'Pas de taux sur ce bulletin, celui d\'un autre mois sera repris.'}
+            ? `Taux appliqué par l'employeur, relevé sur le bulletin : 1 € = ${num(1 / p.rate, 3)} ${p.currency}.`
+            : `Aucun taux sur ce bulletin. Conversion au taux de ${r ? `1 € = ${num(1 / r, 3)} ${p.currency}` : 'défaut'}, repris d'un autre mois.`}
         </p>
-      </div>`).join('')
+      </div>`;
+    }).join('')
       + (errors.length ? `<div class="notice alert">${errors.map(escapeHtml).join('<br>')}</div>` : '');
 
     $('#import-confirm').disabled = false;

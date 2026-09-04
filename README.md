@@ -88,13 +88,21 @@ escale : elles relèvent de la double résidence, pas du courrier. Sans ce régl
 en escale.
 
 Un écran de prévisualisation montre ce qui a été détecté avant enregistrement. Les séjours déjà
-présents ne sont pas dupliqués. La ville n'est pas renseignée, seul le pays compte.
+présents ne sont pas dupliqués. Seul le pays est enregistré, la ville n'entre pas dans le calcul.
+
+Ces plannings sont produits en police à chasse fixe et le texte y est souvent fragmenté, parfois
+lettre par lettre. Les mots sont donc recomposés d'après l'espacement réel entre les fragments.
+Si un import échoue, le message d'erreur cite le début du texte réellement lu, ce qui permet de
+voir tout de suite si le document a été mal découpé.
 
 ### Bulletin de paie
 
 **Revenus → Importer un bulletin PDF**. Plusieurs fichiers peuvent être sélectionnés d'un coup.
 L'app relève les lignes `/106`, `/350`, `/360`, `202F`, `/401` et `/559`, en **additionnant toutes
 les périodes** de chaque code — c'est précisément l'étape où la saisie manuelle échoue.
+
+Chaque montant est affiché dans les deux monnaies, séparées par une barre oblique
+(`92 573,00 / 3 823,64 €`), au taux que l'employeur a lui-même appliqué sur le bulletin.
 
 Le recoupement avec le virement est vérifié avant l'enregistrement et affiché dans la
 prévisualisation. Un bulletin sans taux de change reprend celui d'un autre mois. Réimporter un mois

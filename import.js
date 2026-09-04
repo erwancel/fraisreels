@@ -31,15 +31,30 @@ async function pdfItems(file) {
     const page = await doc.getPage(p);
     const content = await page.getTextContent();
     for (const it of content.items) {
-      const str = (it.str || '').trim();
-      if (!str) continue;
-      items.push({ page: p, x: it.transform[4], y: it.transform[5], str });
+      const str = it.str || '';
+      if (!str.trim()) continue;
+      items.push({
+        page: p,
+        x: it.transform[4],
+        y: it.transform[5],
+        w: it.width || 0,
+        size: Math.abs(it.transform[3]) || it.height || 8,
+        str
+      });
     }
   }
   return items;
 }
 
-/** Reconstruit des lignes de texte à partir des éléments, pour le parsing simple. */
+/**
+ * Regroupe les éléments en lignes, puis recompose les mots.
+ *
+ * Ce planning est produit par un système à chasse fixe : pdf.js renvoie
+ * fréquemment des fragments isolés, parfois lettre par lettre. Coller
+ * bêtement les fragments avec un espace produirait « P e r i o d : » et
+ * rendrait toute reconnaissance impossible. On se sert donc de l'écart
+ * horizontal réel pour décider s'il y a un espace ou non.
+ */
 function itemsToLines(items, tolerance = 2.5) {
   const byPage = {};
   for (const it of items) (byPage[it.page] ??= []).push(it);
@@ -50,16 +65,37 @@ function itemsToLines(items, tolerance = 2.5) {
     let current = null;
     for (const it of sorted) {
       if (!current || Math.abs(current.y - it.y) > tolerance) {
-        current = { page: Number(page), y: it.y, items: [it] };
+        current = { page: Number(page), y: it.y, fragments: [it] };
         lines.push(current);
       } else {
-        current.items.push(it);
+        current.fragments.push(it);
       }
     }
   }
-  for (const l of lines) {
-    l.items.sort((a, b) => a.x - b.x);
-    l.text = l.items.map(i => i.str).join(' ');
+
+  for (const line of lines) {
+    line.fragments.sort((a, b) => a.x - b.x);
+
+    // Fusion des fragments contigus en mots
+    const words = [];
+    let word = null;
+    for (const f of line.fragments) {
+      const gap = word ? f.x - (word.x + word.w) : Infinity;
+      const threshold = 0.32 * (f.size || 8);
+      if (word && gap < threshold) {
+        word.str += f.str;
+        word.w = (f.x + f.w) - word.x;
+      } else {
+        if (word) words.push(word);
+        word = { x: f.x, y: f.y, w: f.w, size: f.size, str: f.str };
+      }
+    }
+    if (word) words.push(word);
+
+    for (const w of words) w.str = w.str.trim();
+    line.items = words.filter(w => w.str);
+    line.text = line.items.map(i => i.str).join(' ');
+    line.dense = line.items.map(i => i.str).join('');
   }
   return lines;
 }
@@ -127,7 +163,7 @@ const airportCountry = (code) => AIRPORT_COUNTRY[code] || null;
 const MONTHS_EN = { JAN: 1, FEB: 2, MAR: 3, APR: 4, MAY: 5, JUN: 6,
                     JUL: 7, AUG: 8, SEP: 9, OCT: 10, NOV: 11, DEC: 12 };
 
-const DAY_MARKER = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)(\d{2})$/;
+const DAY_MARKER = /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s*(\d{2})$/;
 const HOTEL_MARKER = /^H(\d)$/;
 const AIRPORT = /^[A-Z]{3}$/;
 
@@ -142,25 +178,41 @@ const AIRPORT = /^[A-Z]{3}$/;
 function parseRoster(items) {
   const lines = itemsToLines(items);
   const fullText = lines.map(l => l.text).join('\n');
+  // Version sans espaces : résiste aux fragments et aux espacements irréguliers
+  const denseText = lines.map(l => l.dense).join('\n');
 
-  // Période : « Period: 01Aug26 - 31Aug26 »
-  const period = fullText.match(/Period:\s*(\d{2})([A-Za-z]{3})(\d{2})\s*[-–]\s*(\d{2})([A-Za-z]{3})(\d{2})/);
+  const DATE = '(\\d{2})([A-Za-z]{3})(\\d{2})';
+  const period =
+       denseText.match(new RegExp(`Period:${DATE}\\D{1,4}${DATE}`))
+    || fullText.match(new RegExp(`Period:\\s*${DATE}\\s*\\D{1,3}\\s*${DATE}`))
+    || denseText.match(new RegExp(`Period:${DATE}`));
+
   if (!period) {
-    throw new Error("Période introuvable. Ce PDF ne ressemble pas à un planning NetLine/Crew.");
+    const sample = fullText.slice(0, 220).replace(/\s+/g, ' ');
+    throw new Error(
+      `Période introuvable dans ce PDF. Début du texte lu : « ${sample} »`
+    );
   }
+
   const startMonth = MONTHS_EN[period[2].toUpperCase()];
   const startYear = 2000 + Number(period[3]);
-  const endMonth = MONTHS_EN[period[5].toUpperCase()];
-  const endYear = 2000 + Number(period[6]);
+  const firstDay = Number(period[1]);
+  // Le second groupe de dates est absent si seule la date de début a été reconnue
+  const endMonth = period[5] ? MONTHS_EN[period[5].toUpperCase()] : startMonth;
+  const endYear = period[6] ? 2000 + Number(period[6]) : startYear;
   if (!startMonth) throw new Error(`Mois non reconnu : ${period[2]}`);
 
   // Repérage des jours, avec leur colonne et leur hauteur
   const markers = [];
-  for (const it of items) {
-    const m = it.str.match(DAY_MARKER);
-    if (m) markers.push({ ...it, day: Number(m[2]) });
+  for (const line of lines) {
+    for (const w of line.items) {
+      const m = w.str.match(DAY_MARKER);
+      if (m) markers.push({ page: line.page, x: w.x, y: line.y, day: Number(m[2]) });
+    }
   }
-  if (!markers.length) throw new Error("Aucun jour détecté dans ce planning.");
+  if (!markers.length) {
+    throw new Error("Aucun jour détecté. Le planning est peut-être dans une autre mise en page.");
+  }
 
   // Lignes hôtel, avec le code de lieu situé à leur droite
   const hotelLines = [];
@@ -176,6 +228,13 @@ function parseRoster(items) {
       });
       break;
     }
+  }
+
+  if (!hotelLines.length) {
+    throw new Error(
+      `Aucune ligne hôtel trouvée sur les ${markers.length} jours lus. ` +
+      `Sans hébergement identifiable, les nuits ne peuvent pas être déduites.`
+    );
   }
 
   // Rattachement : chaque hôtel appartient au jour le plus proche au-dessus,
@@ -195,7 +254,7 @@ function parseRoster(items) {
 
     // Un roster peut chevaucher deux mois : le numéro de jour tranche.
     const sameMonth = startMonth === endMonth && startYear === endYear;
-    const useEnd = !sameMonth && owner.day < Number(period[1]);
+    const useEnd = !sameMonth && owner.day < firstDay;
     const month = useEnd ? endMonth : startMonth;
     const year = useEnd ? endYear : startYear;
     const iso = `${year}-${String(month).padStart(2, '0')}-${String(owner.day).padStart(2, '0')}`;
@@ -293,19 +352,25 @@ function sumCode(lines, matcher) {
 }
 
 function parsePayslipPdf(items) {
-  const lines = itemsToLines(items).map(l => l.text);
+  const parsedLines = itemsToLines(items);
+  const lines = parsedLines.map(l => l.text);
   const fullText = lines.join('\n');
+  const denseText = parsedLines.map(l => l.dense).join('\n');
 
-  const monthMatch = fullText.match(/Month:\s*([A-Za-z]+)\s+(\d{4})/i);
+  const monthMatch = fullText.match(/Month:\s*([A-Za-z]+)\s+(\d{4})/i)
+                  || denseText.match(/Month:([A-Za-z]+)(\d{4})/i);
   if (!monthMatch) {
-    throw new Error("Mois introuvable. Ce PDF ne ressemble pas à un bulletin Eurowings.");
+    const sample = fullText.slice(0, 200).replace(/\s+/g, ' ');
+    throw new Error(`Mois introuvable dans ce PDF. Début du texte lu : « ${sample} »`);
   }
   const month = MONTHS_LONG[monthMatch[1].toUpperCase()];
   const year = Number(monthMatch[2]);
   if (!month) throw new Error(`Mois non reconnu : ${monthMatch[1]}`);
 
-  const totalCurMatch = fullText.match(/Total payment\s+([A-Z]{3})\s*:\s*([\d.]+,\d{2})/);
-  const totalEurMatch = fullText.match(/Total payment\s+EUR\s*:\s*([\d.]+,\d{2})/);
+  const totalCurMatch = fullText.match(/Total payment\s+([A-Z]{3})\s*:\s*([\d.]+,\d{2})/)
+                     || denseText.match(/Totalpayment([A-Z]{3}):([\d.]+,\d{2})/);
+  const totalEurMatch = fullText.match(/Total payment\s+EUR\s*:\s*([\d.]+,\d{2})/)
+                     || denseText.match(/TotalpaymentEUR:([\d.]+,\d{2})/);
 
   const currency = totalCurMatch?.[1] || 'CZK';
   const totalCur = parseCzAmount(totalCurMatch?.[2]);

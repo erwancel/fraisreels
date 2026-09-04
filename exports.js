@@ -109,7 +109,7 @@ function expensesCsv(data) {
 }
 
 function tripsCsv(data) {
-  const rows = [['Départ', 'Retour', 'Pays', 'Ville', 'Motif', 'Jours', 'Nuitées', 'Note']];
+  const rows = [['Départ', 'Retour', 'Pays', 'Motif', 'Jours', 'Nuitées', 'Note']];
   const sorted = [...data.trips].sort((a, b) => a.start.localeCompare(b.start));
 
   for (const t of sorted) {
@@ -119,7 +119,6 @@ function tripsCsv(data) {
     rows.push([
       t.start, t.end || t.start,
       COUNTRY_BY_CODE[t.country] || t.country,
-      t.city || '',
       PURPOSES[t.purpose] || t.purpose || '',
       days, t.nights ?? Math.max(0, days - 1),
       t.notes || ''
