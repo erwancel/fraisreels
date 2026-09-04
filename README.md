@@ -98,9 +98,22 @@ L'app convertit avec le taux du bulletin lui-même, plus défendable qu'un taux 
 document en porte la trace, et calcule la base retenue pour la déclaration française :
 base imposable moins cotisations sociales obligatoires.
 
-Attention aux périodes : un bulletin d'août peut porter des montants rattachés à juillet
-(les `Service time payment` sont payées avec un mois de décalage). Il faut bien additionner
-toutes les périodes présentes sur le document.
+Attention aux périodes. Les `Service time payment` sont réglées avec un mois de décalage, et le
+bulletin les rattache à leur période d'origine. Un bulletin d'août porte donc plusieurs lignes
+`/106`, `/350` et `/360` pour des mois différents. **Il faut toutes les additionner.** L'oubli le
+plus fréquent porte sur les cotisations régularisées d'un mois antérieur : sur le bulletin d'août
+2026, ignorer les lignes `06/26` et `07/26` fait perdre 3 054 CZK de cotisations déductibles.
+
+Le champ « Virement reçu » sert de garde-fou. L'app vérifie que
+base imposable − cotisations − impôt + per diem = virement, et signale tout écart supérieur à
+deux unités. Si le contrôle passe, la saisie est juste.
+
+Quand un bulletin affiche `Total payment EUR: 0,00` — c'était le cas en juin 2026 — le taux doit
+être saisi à la main. Reprendre celui d'un mois voisin ou le taux officiel de la période.
+
+Si un impôt a été prélevé à tort et fait l'objet d'une demande de remboursement, coche la case
+correspondante. Le montant reste compté dans le contrôle du virement, puisqu'il a bien été retenu,
+mais il n'alimente pas le crédit d'impôt français tant qu'il n'est pas définitivement supporté.
 
 Les recettes Air One Aero se ventilent par catégorie fiscale.
 
@@ -128,6 +141,31 @@ Chaque justificatif porte un numéro de pièce qui correspond à la colonne « P
 Le dossier se transmet tel quel à un comptable.
 
 ---
+
+## Frais en courrier
+
+Le poste le plus important pour un navigant. Une indemnité forfaitaire par **nuit d'escale**, au
+taux du pays où tu dors, plus une demi-indemnité le jour du retour en base.
+
+Base juridique : instruction 5 F-1-99 du 30 décembre 1998 et lettre du directeur de la Législation
+Fiscale n°99002172 du 15 février 1999, qui renvoie au barème du groupe II des indemnités
+journalières servies aux personnels de l'État en mission temporaire à l'étranger.
+
+Le module est **désactivé par défaut**. Les taux préchargés sont des ordres de grandeur relevés
+dans la documentation syndicale : remplace-les par le document officiel de l'année déclarée, dans
+Réglages → Frais en courrier. Un pays par ligne au format `CH=248`, la ligne `DEFAUT` couvrant la
+zone euro et Schengen.
+
+Trois garde-fous sont intégrés :
+
+- **Pas de double déduction.** Quand le forfait est actif, les dépenses de repas, hébergement et
+  transports en escale cessent d'être comptées séparément. Le montant écarté reste affiché.
+- **Per diem déduit.** Les indemnités déjà versées par la compagnie (`202F`) sont prises en compte.
+  Deux méthodes au choix : réintégrer le per diem au salaire déclaré et déduire le forfait entier
+  (méthode par défaut, celle attendue par l'administration), ou ne déduire que le solde.
+- **Séjours non éligibles écartés.** La présence en base d'affectation relève de la double
+  résidence, pas de l'escale, et les missions Air One Aero ne sont pas du salariat. Ces séjours
+  sont exclus du calcul.
 
 ## Le comparateur
 

@@ -71,6 +71,7 @@
       <section class="view" id="view-board" role="tabpanel">
         <div id="board-verdict"></div>
         <div class="stats" id="board-stats"></div>
+        <div id="board-composition"></div>
 
         <div class="panel">
           <div class="panel-head">
@@ -425,9 +426,9 @@
 
     <div id="ps-rate-block">
       <div class="notice">
-        Le bulletin porte lui-même son taux de change, en bas de l'en-tête :
-        <strong>Total payment</strong> en devise et en euros. Recopie les deux montants,
-        le taux se calcule tout seul.
+        Le bulletin porte souvent son propre taux de change dans l'en-tête :
+        <strong>Total payment</strong> en devise et en euros. Recopie les deux montants, le taux se
+        calcule tout seul. Quand la case euros est à zéro, saisis le taux directement.
       </div>
       <div class="field-row">
         <div class="field">
@@ -439,7 +440,11 @@
           <input type="text" inputmode="decimal" id="ps-total-eur" placeholder="4 507,46">
         </div>
       </div>
-      <p class="verdict-note" id="ps-rate-hint" style="margin:-4px 0 12px"></p>
+      <div class="field">
+        <label for="ps-rate">Taux appliqué — 1 unité de devise en euros</label>
+        <input type="text" inputmode="decimal" id="ps-rate" placeholder="0,041314">
+        <p class="verdict-note" id="ps-rate-hint" style="margin:6px 0 0"></p>
+      </div>
     </div>
 
     <h3 style="margin:16px 0 8px">Montants du bulletin</h3>
@@ -448,8 +453,8 @@
       <label for="ps-base">Base imposable — ligne /106</label>
       <input type="text" inputmode="decimal" id="ps-base" class="amount-input" placeholder="0,00" required>
       <p class="verdict-note" style="margin:6px 0 0">
-        Additionne toutes les périodes de la ligne <code>/106 Eval.base tax</code> présentes sur ce bulletin,
-        y compris le rappel du mois précédent.
+        Additionne toutes les périodes de la ligne <code>/106 Eval.base tax</code> présentes sur ce
+        bulletin. Sur le bulletin de juillet : 17 566 + 75 007.
       </p>
     </div>
 
@@ -457,8 +462,9 @@
       <label for="ps-social">Cotisations salariales — lignes /350 et /360</label>
       <input type="text" inputmode="decimal" id="ps-social" placeholder="0,00">
       <p class="verdict-note" style="margin:6px 0 0">
-        <code>HI part EE</code> + <code>SI part EE</code>, toutes périodes confondues.
-        Ne prends pas les lignes <code>part ER</code>, qui sont à la charge de l'employeur.
+        <code>HI part EE</code> + <code>SI part EE</code>, <strong>toutes périodes comprises</strong>,
+        y compris les régularisations des mois antérieurs. Ne prends jamais les lignes
+        <code>part ER</code>, qui sont à la charge de l'employeur.
       </p>
     </div>
 
@@ -476,7 +482,18 @@
     <div class="field">
       <label for="ps-net">Virement reçu — /559</label>
       <input type="text" inputmode="decimal" id="ps-net" placeholder="0,00">
+      <p class="verdict-note" style="margin:6px 0 0">
+        Sert de contrôle : la saisie est vérifiée contre ce montant.
+      </p>
     </div>
+
+    <label class="inline-check">
+      <input type="checkbox" id="ps-tax-disputed">
+      <span>Impôt prélevé à tort, remboursement attendu
+        <small>Le montant reste compté dans le contrôle du virement, mais n'ouvre aucun crédit
+        d'impôt en France tant qu'il n'est pas définitivement supporté.</small>
+      </span>
+    </label>
 
     <div class="notice" id="ps-computed" style="border-left-color:var(--gain)"></div>
 
@@ -613,6 +630,45 @@
       <label for="st-rates">Taux de conversion vers l'euro</label>
       <textarea id="st-rates" spellcheck="false" style="font-family:var(--font-num);font-size:.85rem"></textarea>
       <p class="verdict-note" style="margin:6px 0 0">Une devise par ligne, au format <code>CHF=1.07</code>. Modifiable à tout moment.</p>
+    </div>
+
+    <h3 style="margin:18px 0 8px">Frais en courrier</h3>
+    <div class="notice">
+      Indemnité forfaitaire par nuit d'escale, au taux du pays où tu dors. Base : lettre DLF
+      n°99002172 du 15 février 1999, renvoyant au barème du groupe II des indemnités journalières
+      de mission à l'étranger. Les taux préchargés sont des ordres de grandeur :
+      <strong>remplace-les par le document de ton syndicat</strong> pour l'année déclarée.
+    </div>
+    <label class="inline-check">
+      <input type="checkbox" id="st-courrier">
+      <span>Appliquer le forfait d'escale
+        <small>Les dépenses de repas, hébergement et transports en escale cessent alors d'être
+        comptées séparément, pour éviter la double déduction.</small>
+      </span>
+    </label>
+    <label class="inline-check">
+      <input type="checkbox" id="st-courrier-half">
+      <span>Demi-indemnité le jour du retour en base</span>
+    </label>
+    <div class="field">
+      <label for="st-courrier-method">Traitement du per diem reçu</label>
+      <select id="st-courrier-method">
+        <option value="brute">Réintégrer au salaire, déduire le forfait entier</option>
+        <option value="nette">Déduire seulement le solde forfait moins per diem</option>
+      </select>
+      <p class="verdict-note" style="margin:6px 0 0">
+        Même résultat final. La première méthode est celle attendue par l'administration :
+        ne pas réintégrer les indemnités de la compagnie est un motif fréquent de redressement.
+      </p>
+    </div>
+    <div class="field">
+      <label for="st-courrier-rates">Barème par nuit d'escale</label>
+      <textarea id="st-courrier-rates" spellcheck="false" rows="8"
+                style="font-family:var(--font-num);font-size:.85rem"></textarea>
+      <p class="verdict-note" style="margin:6px 0 0">
+        Un pays par ligne au format <code>CH=248</code>. La ligne <code>DEFAUT</code> couvre
+        la zone euro et Schengen.
+      </p>
     </div>
 
     <h3 style="margin:18px 0 8px">Affichage</h3>

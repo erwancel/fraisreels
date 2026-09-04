@@ -211,9 +211,13 @@ async function buildPdf(data) {
     styles: { fontSize: 9.5, cellPadding: { top: 2, bottom: 2, left: 0, right: 0 } },
     columnStyles: { 0: { cellWidth: 110 }, 1: { halign: 'right', fontStyle: 'bold' } },
     body: [
-      ['Salaire net imposable déclaré', eur(data.taxableSalary)],
+      ['Salaire net imposable déclaré', eur(data.declaredSalary)],
       [`Abattement forfaitaire de 10 % (plancher ${eur0(data.abatementBounds.min)}, plafond ${eur0(data.abatementBounds.max)})`, eur(data.abatement)],
-      ['Total des frais réels justifiés', eur(data.deductible)],
+      ...(data.courrierDeduction
+        ? [[`Frais en courrier — ${data.courrier.nights} nuits d'escale`, eur(data.courrierDeduction)],
+           ['Autres frais sur justificatifs', eur(data.expensesDeductible)]]
+        : []),
+      ['Total des frais réels', eur(data.deductible)],
       [data.advantage >= 0 ? 'Gain de base imposable en optant pour le réel' : 'Écart en faveur de l\'abattement', eur(Math.abs(data.advantage))]
     ]
   });
@@ -255,11 +259,14 @@ async function buildPdf(data) {
     styles: { fontSize: 9, cellPadding: 2.2 },
     columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' } },
     head: [['Poste', 'Nombre', 'Montant']],
-    body: data.categories.map(c => {
+    body: (data.courrierDeduction
+      ? [[`Frais en courrier (${data.courrier.nights} nuits)`, String(data.courrier.counted), eur(data.courrierDeduction)]]
+      : []
+    ).concat(data.categories.map(c => {
       const count = data.expenses.filter(e =>
         e.category === c.id && e.attach !== 'aoa' && !e.reimbursed).length;
       return [c.label, String(count), eur(c.total)];
-    }),
+    })),
     foot: [['Total', '', eur(data.deductible)]],
     footStyles: { fillColor: [240, 240, 240], textColor: 20, fontStyle: 'bold', halign: 'right' }
   });
@@ -276,9 +283,20 @@ async function buildPdf(data) {
       headStyles: { fillColor: [38, 48, 62], textColor: 255, fontSize: 9 },
       styles: { fontSize: 9, cellPadding: 2.2 },
       columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' } },
-      head: [['Pays', 'Jours de présence', 'Nuitées']],
-      body: data.countries.rows.map(c => [c.name, String(c.days), String(c.nights)]),
-      foot: [['Total', String(data.countries.totalDays), String(data.countries.totalNights)]],
+      head: data.courrierOn
+        ? [['Pays', 'Jours de présence', 'Nuitées', 'Forfait escale']]
+        : [['Pays', 'Jours de présence', 'Nuitées']],
+      body: data.countries.rows.map(c => {
+        const row = [c.name, String(c.days), String(c.nights)];
+        if (data.courrierOn) {
+          const cr = data.courrier.rows.find(x => x.code === c.code);
+          row.push(cr ? eur(cr.total) : '—');
+        }
+        return row;
+      }),
+      foot: [data.courrierOn
+        ? ['Total', String(data.countries.totalDays), String(data.countries.totalNights), eur(data.courrier.gross)]
+        : ['Total', String(data.countries.totalDays), String(data.countries.totalNights)]],
       footStyles: { fillColor: [240, 240, 240], textColor: 20, fontStyle: 'bold' }
     });
     y = doc.lastAutoTable.finalY + 10;

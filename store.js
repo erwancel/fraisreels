@@ -10,12 +10,14 @@ const STORES = ['expenses', 'receipts', 'trips', 'payslips', 'revenues', 'settin
 /* ---------- Référentiels ---------- */
 
 // Postes de dépense adaptés au personnel navigant.
+// « courrier » marque les frais couverts par le barème forfaitaire de découchés :
+// quand le barème est activé, ces postes sont remplacés par le calcul par nuitée.
 const CATEGORIES = [
-  { id: 'repas',      label: 'Repas',              hint: 'Repas hors domicile pendant le service' },
-  { id: 'hotel',      label: 'Hébergement',        hint: 'Hôtel non pris en charge, découché' },
+  { id: 'repas',      label: 'Repas',              courrier: true,  hint: 'Repas hors domicile pendant le service' },
+  { id: 'hotel',      label: 'Hébergement',        courrier: true,  hint: 'Hôtel non pris en charge, découché' },
+  { id: 'escale',     label: 'Transports en escale', courrier: true, hint: 'Navette, taxi, transport local en rotation' },
   { id: 'residence',  label: 'Double résidence',   hint: 'Loyer, charges, énergie, assurance du logement en base' },
   { id: 'trajet',     label: 'Trajet domicile-base', hint: 'Billets, carburant, péage, parking, train' },
-  { id: 'escale',     label: 'Transports en escale', hint: 'Navette, taxi, transport local en rotation' },
   { id: 'uniforme',   label: 'Uniforme',           hint: 'Achat, remplacement, pressing, chaussures' },
   { id: 'materiel',   label: 'Matériel de vol',    hint: 'Tablette, casque, lampe, valise, accessoires' },
   { id: 'doc',        label: 'Documentation',      hint: 'Cartes, abonnements, logiciels, revues' },
@@ -26,6 +28,8 @@ const CATEGORIES = [
   { id: 'bancaire',   label: 'Frais bancaires',    hint: 'Change, commissions à l\'étranger' },
   { id: 'autre',      label: 'Autre',              hint: '' }
 ];
+
+const COURRIER_IDS = CATEGORIES.filter(c => c.courrier).map(c => c.id);
 
 const CAT_BY_ID = Object.fromEntries(CATEGORIES.map(c => [c.id, c]));
 
@@ -202,7 +206,25 @@ const SETTINGS_DEFAULTS = {
   rates: { CHF: 1.06, GBP: 1.17, USD: 0.92, PLN: 0.23, CZK: 0.0413, DKK: 0.134,
            SEK: 0.088, NOK: 0.086, HUF: 0.0026, RON: 0.20, TRY: 0.028, MAD: 0.093, AED: 0.25 },
   abatement: {},          // { 2026: {min,max} } — surcharge manuelle
-  lastBackup: null
+  lastBackup: null,
+
+  /* Frais en courrier — indemnités journalières d'escale.
+     Base : lettre DLF n°99002172 du 15 février 1999, renvoyant au barème du groupe II
+     des indemnités journalières de mission à l'étranger.
+     Les taux ci-dessous sont des ordres de grandeur relevés dans la documentation
+     syndicale, à remplacer par le document officiel de l'année déclarée. */
+  courrier: {
+    enabled: false,
+    method: 'brute',      // 'brute' : per diem réintégré en 1AJ, forfait entier en 1AK
+                          // 'nette' : 1AK = forfait moins per diem reçu
+    halfReturn: true,     // demi-indemnité le jour du retour en base
+    rates: {
+      DEFAUT: 174,        // zone euro et Schengen, moyen-courrier
+      GB: 207, CH: 248, NO: 222, SE: 196, DK: 228,
+      TR: 128, MA: 150, TN: 120, IL: 228, EG: 162,
+      US: 301, CA: 222
+    }
+  }
 };
 
 let settings = { ...SETTINGS_DEFAULTS };
@@ -213,6 +235,11 @@ async function loadSettings() {
   settings = { ...SETTINGS_DEFAULTS, ...stored };
   settings.rates = { ...SETTINGS_DEFAULTS.rates, ...(stored.rates || {}) };
   settings.abatement = { ...(stored.abatement || {}) };
+  settings.courrier = {
+    ...SETTINGS_DEFAULTS.courrier,
+    ...(stored.courrier || {}),
+    rates: { ...SETTINGS_DEFAULTS.courrier.rates, ...(stored.courrier?.rates || {}) }
+  };
   return settings;
 }
 
@@ -348,6 +375,70 @@ function payslipEur(p) {
   };
 }
 
+/**
+ * Contrôle de saisie : sur ces bulletins, le virement doit toujours valoir
+ * base imposable − cotisations − impôt + per diem non imposable.
+ * Un écart signale une ligne oubliée, le plus souvent une régularisation
+ * de cotisations rattachée à un mois antérieur.
+ */
+function payslipBalance(p) {
+  const base   = p.taxableBase ?? p.taxable ?? 0;
+  const social = p.social ?? 0;
+  const tax    = p.taxPaid ?? p.withheld ?? 0;
+  const perdiem = p.allowance || 0;
+  const actual = p.net || 0;
+  const expected = base - social - tax + perdiem;
+  const diff = expected - actual;
+  return {
+    expected, actual, diff,
+    checked: actual > 0,
+    ok: actual > 0 && Math.abs(diff) <= 2
+  };
+}
+
+/* ---------- Frais en courrier ---------- */
+
+// Motifs qui n'ouvrent pas droit à indemnité d'escale : la présence en base
+// d'affectation relève de la double résidence, les missions Air One Aero
+// ne sont pas du salariat.
+const NO_ALLOWANCE_PURPOSES = new Set(['base', 'mission']);
+
+function courrierRate(country) {
+  const r = settings.courrier.rates;
+  return r[country] ?? r.DEFAUT ?? 0;
+}
+
+/** Indemnité d'un séjour : une nuit d'escale = une indemnité pleine, plus une demie au retour. */
+function tripAllowance(trip) {
+  const c = settings.courrier;
+  if (!c.enabled) return { eligible: false, nights: 0, rate: 0, units: 0, amount: 0 };
+  if (NO_ALLOWANCE_PURPOSES.has(trip.purpose)) {
+    return { eligible: false, nights: trip.nights ?? 0, rate: 0, units: 0, amount: 0 };
+  }
+  const nights = trip.nights ?? 0;
+  if (nights <= 0) return { eligible: true, nights: 0, rate: 0, units: 0, amount: 0 };
+  const rate = courrierRate(trip.country);
+  const units = nights + (c.halfReturn ? 0.5 : 0);
+  return { eligible: true, nights, rate, units, amount: units * rate };
+}
+
+function courrierTotals(trips) {
+  let gross = 0, nights = 0, counted = 0;
+  const byCountry = {};
+  for (const t of trips) {
+    const a = tripAllowance(t);
+    if (!a.amount) continue;
+    gross += a.amount;
+    nights += a.nights;
+    counted++;
+    byCountry[t.country] = (byCountry[t.country] || 0) + a.amount;
+  }
+  const rows = Object.entries(byCountry)
+    .map(([code, total]) => ({ code, name: COUNTRY_BY_CODE[code] || code, rate: courrierRate(code), total }))
+    .sort((a, b) => b.total - a.total);
+  return { gross, nights, counted, rows };
+}
+
 /* ---------- Calculs annuels ---------- */
 
 /** Jours de présence et nuitées par pays, à partir des séjours. */
@@ -390,8 +481,13 @@ async function computeYear(year) {
     db.byYear('revenues', year)
   ]);
 
-  // Frais réels
-  let deductible = 0, reimbursed = 0, aoaSpend = 0, missingProof = 0;
+  // Frais réels sur justificatifs.
+  // Quand le forfait d'escale est actif, il couvre déjà les repas et l'hébergement
+  // en courrier : ces postes sont écartés pour éviter une double déduction.
+  const courrierOn = settings.courrier.enabled;
+  const COVERED = new Set(['repas', 'hotel', 'escale']);
+
+  let deductible = 0, reimbursed = 0, aoaSpend = 0, missingProof = 0, supersededByForfait = 0;
   const byCategory = {};
 
   for (const e of expenses) {
@@ -400,6 +496,8 @@ async function computeYear(year) {
       aoaSpend += toEur(e.amount, e.currency);
     } else if (e.reimbursed) {
       reimbursed += toEur(e.amount, e.currency);
+    } else if (courrierOn && COVERED.has(e.category)) {
+      supersededByForfait += d;
     } else {
       deductible += d;
       byCategory[e.category] = (byCategory[e.category] || 0) + d;
@@ -418,25 +516,47 @@ async function computeYear(year) {
     acc.taxableBase += e.taxableBase;
     acc.social      += e.social;
     acc.allowance   += e.allowance;
-    acc.taxPaid     += e.taxPaid;
+    // Un impôt prélevé à tort n'ouvre pas droit à crédit d'impôt : il sera remboursé.
+    if (p.taxDisputed) acc.taxToRecover += e.taxPaid;
+    else acc.taxPaid += e.taxPaid;
     return acc;
-  }, { frenchBase: 0, taxableBase: 0, social: 0, allowance: 0, taxPaid: 0 });
+  }, { frenchBase: 0, taxableBase: 0, social: 0, allowance: 0, taxPaid: 0, taxToRecover: 0 });
 
   const taxableSalary = slipTotals.frenchBase;
   const allowances    = slipTotals.allowance;
   const grossSalary   = slipTotals.taxableBase;
   const socialPaid    = slipTotals.social;
   const foreignTax    = slipTotals.taxPaid;
+  const taxToRecover  = slipTotals.taxToRecover;
   const foreignSalary = payslips.filter(p => p.source && p.source !== 'FR')
                                 .reduce((s, p) => s + payslipEur(p).frenchBase, 0);
 
+  const unbalanced = payslips.filter(p => {
+    const b = payslipBalance(p);
+    return b.checked && !b.ok;
+  }).length;
+
+  // Frais en courrier : forfait d'escale, minoré ou compensé par le per diem reçu
+  const courrier = courrierTotals(trips);
+  const courrierNet = courrierOn ? Math.max(0, courrier.gross - allowances) : 0;
+
+  // Méthode « brute » : le per diem est réintégré au salaire déclaré et le forfait
+  // se déduit en entier. Méthode « nette » : on ne déclare que le solde.
+  // Les deux aboutissent au même revenu net, seule la présentation change.
+  const method = settings.courrier.method || 'brute';
+  const useBrute = courrierOn && method === 'brute';
+  const declaredSalary = useBrute ? taxableSalary + allowances : taxableSalary;
+  const courrierDeduction = courrierOn ? (useBrute ? courrier.gross : courrierNet) : 0;
+
+  const totalDeductible = deductible + courrierDeduction;
+
   // Abattement de 10 % vs frais réels
   const bounds = abatementBounds(year);
-  const raw = taxableSalary * 0.10;
-  const abatement = taxableSalary > 0
+  const raw = declaredSalary * 0.10;
+  const abatement = declaredSalary > 0
     ? Math.min(bounds.max, Math.max(bounds.min, raw))
     : 0;
-  const advantage = deductible - abatement;
+  const advantage = totalDeductible - abatement;
 
   // Chiffre d'affaires micro
   const byRegime = {};
@@ -455,8 +575,13 @@ async function computeYear(year) {
 
   return {
     year, expenses, trips, payslips, revenues,
-    deductible, reimbursed, aoaSpend, missingProof, categories,
-    taxableSalary, allowances, grossSalary, socialPaid, foreignTax, foreignSalary,
+    expensesDeductible: deductible,
+    deductible: totalDeductible,
+    courrierOn, courrier, courrierNet, courrierDeduction, method, useBrute,
+    supersededByForfait,
+    reimbursed, aoaSpend, missingProof, categories,
+    taxableSalary, declaredSalary, allowances, grossSalary, socialPaid,
+    foreignTax, taxToRecover, foreignSalary, unbalanced,
     abatement, abatementBounds: bounds, advantage,
     countries: countryTally(trips),
     revenueRows, turnover, netMicro

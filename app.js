@@ -110,7 +110,7 @@ function renderBoard() {
   const stats = [
     { label: 'Jours hors domicile', value: d.countries.totalDays, sub: `${d.countries.totalNights} nuitées` },
     { label: 'Dépenses saisies', value: d.expenses.length, sub: d.missingProof ? `${d.missingProof} sans pièce` : 'toutes justifiées' },
-    { label: 'Net imposable', value: eur0(d.taxableSalary), sub: `${d.payslips.length} bulletins` },
+    { label: 'Salaire déclaré', value: eur0(d.declaredSalary), sub: `${d.payslips.length} bulletins` },
     { label: 'CA Air One Aero', value: eur0(d.turnover), sub: `${d.revenues.length} recettes` }
   ];
   $('#board-stats').innerHTML = stats.map(s => `
@@ -119,6 +119,24 @@ function renderBoard() {
       <span class="value">${s.value}</span>
       <div class="sub">${s.sub}</div>
     </div>`).join('');
+
+  // Composition du total, quand le forfait d'escale entre en jeu
+  $('#board-composition').innerHTML = d.courrierOn ? `
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Composition des frais réels</h2>
+        <span class="hint">${d.courrier.nights} nuits d'escale</span>
+      </div>
+      <table class="grid">
+        <tbody>
+          <tr><td>Forfait d'escale${d.useBrute ? '' : ', net du per diem'}</td><td class="num">${eur(d.courrierDeduction)}</td></tr>
+          <tr><td>Autres frais sur justificatifs</td><td class="num">${eur(d.expensesDeductible)}</td></tr>
+          ${d.useBrute ? `<tr><td style="color:var(--ink-3)">Per diem réintégré au salaire déclaré</td><td class="num" style="color:var(--ink-3)">+ ${eur(d.allowances)}</td></tr>` : ''}
+        </tbody>
+        <tfoot><tr><td>Total déductible</td><td class="num">${eur(d.deductible)}</td></tr></tfoot>
+      </table>
+      ${d.supersededByForfait > 0 ? `<p class="verdict-note" style="margin-top:10px">${eur(d.supersededByForfait)} de repas, hébergement et transports en escale sont couverts par le forfait et ne sont donc pas comptés en plus.</p>` : ''}
+    </div>` : '';
 
   // Répartition par poste
   const cats = d.categories;
@@ -256,12 +274,20 @@ function renderTrips() {
 
   $('#trip-summary').innerHTML = c.rows.length
     ? `<table class="grid">
-        <thead><tr><th>Pays</th><th class="num">Jours</th><th class="num">Nuitées</th></tr></thead>
-        <tbody>${c.rows.map(r => `
-          <tr><td>${escapeHtml(r.name)}</td><td class="num">${r.days}</td><td class="num">${r.nights}</td></tr>`).join('')}
+        <thead><tr><th>Pays</th><th class="num">Jours</th><th class="num">Nuitées</th>${d.courrierOn ? '<th class="num">Forfait</th>' : ''}</tr></thead>
+        <tbody>${c.rows.map(r => {
+          const cr = d.courrier.rows.find(x => x.code === r.code);
+          return `<tr><td>${escapeHtml(r.name)}</td><td class="num">${r.days}</td><td class="num">${r.nights}</td>${d.courrierOn ? `<td class="num">${cr ? eur(cr.total) : '—'}</td>` : ''}</tr>`;
+        }).join('')}
         </tbody>
-        <tfoot><tr><td>Total</td><td class="num">${c.totalDays}</td><td class="num">${c.totalNights}</td></tr></tfoot>
-      </table>`
+        <tfoot><tr><td>Total</td><td class="num">${c.totalDays}</td><td class="num">${c.totalNights}</td>${d.courrierOn ? `<td class="num">${eur(d.courrier.gross)}</td>` : ''}</tr></tfoot>
+      </table>
+      ${d.courrierOn ? `<p class="verdict-note" style="margin-top:10px">
+        Forfait d'escale sur ${d.courrier.nights} nuits. Per diem déjà reçu de ton employeur :
+        ${eur(d.allowances)}. ${d.useBrute
+          ? 'Ce per diem est réintégré à ton salaire déclaré et le forfait se déduit en entier.'
+          : `Déduction retenue : ${eur(d.courrierNet)}.`}
+      </p>` : ''}`
     : `<div class="empty">Rien à décompter pour ${d.year}.</div>`;
 
   const trips = [...d.trips].sort((a, b) => b.start.localeCompare(a.start));
@@ -271,6 +297,7 @@ function renderTrips() {
     const e = new Date((t.end || t.start) + 'T12:00:00');
     const days = Math.round((e - s) / 86400000) + 1;
     const nights = t.nights ?? Math.max(0, days - 1);
+    const a = tripAllowance(t);
     return `
       <button type="button" class="log-row" data-trip="${t.id}">
         <span class="log-date"><b>${day}</b>${month}</span>
@@ -278,7 +305,7 @@ function renderTrips() {
           <span class="log-label">${escapeHtml(COUNTRY_BY_CODE[t.country] || t.country)}${t.city ? ' — ' + escapeHtml(t.city) : ''}</span>
           <span class="log-meta">${escapeHtml(PURPOSES[t.purpose] || '')}<span class="dot"></span>${t.start.split('-').reverse().slice(0, 2).join('/') } → ${(t.end || t.start).split('-').reverse().slice(0, 2).join('/')}</span>
         </span>
-        <span class="log-amount">${days} j<small>${nights} nuit${nights > 1 ? 's' : ''}</small></span>
+        <span class="log-amount">${a.amount ? eur(a.amount) : days + ' j'}<small>${a.amount ? `${a.units} × ${eur0(a.rate)}` : `${nights} nuit${nights > 1 ? 's' : ''}`}</small></span>
       </button>`;
   }).join('') : `<div class="empty"><strong>Aucun séjour</strong>Ajoute tes rotations et découchés au fil de l'eau.</div>`;
 }
@@ -295,8 +322,9 @@ function renderIncome() {
       <div class="stat"><span class="label">Base imposable France</span><span class="value">${eur0(d.taxableSalary)}</span><div class="sub">après cotisations</div></div>
       <div class="stat"><span class="label">Per diem non imposable</span><span class="value">${eur0(d.allowances)}</span><div class="sub">hors base</div></div>
       <div class="stat"><span class="label">Cotisations retenues</span><span class="value">${eur0(d.socialPaid)}</span><div class="sub">part salariale</div></div>
-      <div class="stat"><span class="label">Impôt payé sur place</span><span class="value">${eur0(d.foreignTax)}</span><div class="sub">crédit d'impôt possible</div></div>
-    </div>`;
+      <div class="stat"><span class="label">Impôt payé sur place</span><span class="value">${eur0(d.foreignTax)}</span><div class="sub">${d.taxToRecover ? 'hors montants contestés' : "crédit d'impôt possible"}</div></div>
+    </div>
+    ${d.taxToRecover ? `<div class="notice alert">${eur(d.taxToRecover)} d'impôt prélevé à tort, en attente de remboursement. Ce montant n'ouvre aucun crédit d'impôt tant qu'il n'est pas définitivement supporté.</div>` : ''}`;
 
   const SOURCES = { CZ: 'Tchéquie', MT: 'Malte', DE: 'Allemagne', AT: 'Autriche', FR: 'France', AUTRE: 'Autre' };
   const slips = [...d.payslips].sort((a, b) => (b.month || '').localeCompare(a.month || ''));
@@ -304,6 +332,7 @@ function renderIncome() {
     const [y, m] = (p.month || '').split('-');
     const months = ['janv', 'févr', 'mars', 'avril', 'mai', 'juin', 'juil', 'août', 'sept', 'oct', 'nov', 'déc'];
     const e = payslipEur(p);
+    const bal = payslipBalance(p);
     const foreign = p.currency && p.currency !== 'EUR';
     return `
       <button type="button" class="log-row" data-payslip="${p.id}">
@@ -312,6 +341,7 @@ function renderIncome() {
           <span class="log-label">${escapeHtml(p.employer || 'Bulletin')}</span>
           <span class="log-meta">${SOURCES[p.source] || 'Autre'}
             ${e.allowance ? `<span class="dot"></span>${eur0(e.allowance)} de per diem` : ''}
+            ${bal.checked && !bal.ok ? '<span class="dot"></span><span class="clip no-clip">à vérifier</span>' : ''}
             ${p.receiptIds?.length ? '<span class="dot"></span><span class="clip">scanné</span>' : ''}
           </span>
         </span>
@@ -357,7 +387,12 @@ function renderIncome() {
 
 function reportDetailText() {
   const d = state.data;
-  const lines = d.categories.map(c => `${c.label} : ${eur(c.total)}`);
+  const lines = [
+    ...(d.courrierDeduction
+      ? [`Frais en courrier, ${d.courrier.nights} nuits d'escale : ${eur(d.courrierDeduction)}`]
+      : []),
+    ...d.categories.map(c => `${c.label} : ${eur(c.total)}`)
+  ];
   return `Frais réels ${d.year}\n` +
     `${settings.name ? settings.name + '\n' : ''}` +
     lines.join('\n') +
@@ -376,8 +411,10 @@ function renderReport() {
 
   const boxes = [
     { code: '1AJ', label: 'Salaires nets imposables',
-      sub: foreign ? 'base étrangère après cotisations, convertie en euros' : 'cumul des bulletins',
-      value: eur(d.taxableSalary) },
+      sub: d.useBrute
+        ? 'base étrangère après cotisations, per diem réintégré'
+        : (foreign ? 'base étrangère après cotisations, convertie en euros' : 'cumul des bulletins'),
+      value: eur(d.declaredSalary) },
     { code: '1AK', label: 'Frais réels',
       sub: d.advantage > 0 ? 'plus avantageux que l\'abattement' : 'moins avantageux que l\'abattement de 10 %',
       value: eur(d.deductible) },
@@ -404,11 +441,16 @@ function renderReport() {
       <span class="box-code">${b.code}</span>
       <span class="box-label">${escapeHtml(b.label)}<small>${escapeHtml(b.sub)}</small></span>
       <span class="box-value">${b.value}</span>
-    </div>`).join('');
+    </div>`).join('')
+    + (d.unbalanced
+      ? `<div class="notice alert" style="margin:12px 0 0">${d.unbalanced} bulletin${d.unbalanced > 1 ? 's ne se recoupent' : ' ne se recoupe'} pas avec le virement reçu. Les montants ci-dessus sont donc incertains.</div>`
+      : '');
 
-  $('#report-detail').innerHTML = d.categories.length
+  $('#report-detail').innerHTML = (d.categories.length || d.courrierDeduction)
     ? `<table class="grid">
-        <tbody>${d.categories.map(c => {
+        <tbody>
+        ${d.courrierDeduction ? `<tr><td>Frais en courrier — ${d.courrier.nights} nuits d'escale</td><td class="num" style="color:var(--ink-3)">${d.courrier.counted}</td><td class="num">${eur(d.courrierDeduction)}</td></tr>` : ''}
+        ${d.categories.map(c => {
           const n = d.expenses.filter(e => e.category === c.id && e.attach !== 'aoa' && !e.reimbursed).length;
           return `<tr><td>${escapeHtml(c.label)}</td><td class="num" style="color:var(--ink-3)">${n}</td><td class="num">${eur(c.total)}</td></tr>`;
         }).join('')}</tbody>
@@ -633,11 +675,14 @@ function openPayslip(slip) {
 
   $('#ps-total-cur').value = slip?.totalCur ? num(slip.totalCur) : '';
   $('#ps-total-eur').value = slip?.totalEur ? num(slip.totalEur) : '';
+  $('#ps-rate').value      = slip?.rate ? num(slip.rate, 6)
+                           : (previous?.rate ? num(previous.rate, 6) : '');
   $('#ps-base').value      = slip ? num(slip.taxableBase ?? slip.taxable ?? 0) : '';
   $('#ps-social').value    = slip?.social    ? num(slip.social) : '';
   $('#ps-allowance').value = slip?.allowance ? num(slip.allowance) : '';
   $('#ps-tax').value       = slip?.taxPaid   ? num(slip.taxPaid) : '';
   $('#ps-net').value       = slip?.net       ? num(slip.net) : '';
+  $('#ps-tax-disputed').checked = !!slip?.taxDisputed;
 
   $('#ps-receipts').innerHTML = '';
   if (!isNew && slip.receiptIds?.length) {
@@ -655,14 +700,23 @@ function lastPayslip() {
   return slips.at(-1) || null;
 }
 
-/** Taux de change saisi via les deux totaux du bulletin, sinon celui des réglages. */
+/** Priorité au taux saisi, sinon celui des réglages. */
 function currentPayslipRate() {
   const cur = $('#ps-currency').value;
   if (cur === 'EUR') return 1;
+  const manual = parseAmount($('#ps-rate').value);
+  if (manual > 0) return manual;
+  return settings.rates[cur] || 1;
+}
+
+/** Les deux totaux de l'en-tête remplissent le champ de taux. */
+function syncRateFromTotals() {
   const totalCur = parseAmount($('#ps-total-cur').value);
   const totalEur = parseAmount($('#ps-total-eur').value);
-  if (totalCur > 0 && totalEur > 0) return totalEur / totalCur;
-  return settings.rates[cur] || 1;
+  if (totalCur > 0 && totalEur > 0) {
+    $('#ps-rate').value = num(totalEur / totalCur, 6);
+  }
+  updatePayslipPreview();
 }
 
 function updatePayslipPreview() {
@@ -675,27 +729,41 @@ function updatePayslipPreview() {
   const social = parseAmount($('#ps-social').value);
   const allowance = parseAmount($('#ps-allowance').value);
   const tax = parseAmount($('#ps-tax').value);
+  const net = parseAmount($('#ps-net').value);
   const frenchBase = Math.max(0, base - social) * rate;
 
   if (!isEuro) {
-    const totalCur = parseAmount($('#ps-total-cur').value);
     const totalEur = parseAmount($('#ps-total-eur').value);
-    $('#ps-rate-hint').innerHTML = (totalCur > 0 && totalEur > 0)
-      ? `Taux du bulletin : 1 ${cur} = <strong>${num(rate, 6)} €</strong>, soit 1 € = ${num(1 / rate, 3)} ${cur}.`
-      : `À défaut, le taux des réglages sera utilisé : 1 ${cur} = ${num(settings.rates[cur] || 1, 6)} €.`;
+    $('#ps-rate-hint').innerHTML = totalEur > 0
+      ? `Calculé depuis l'en-tête du bulletin : 1 € = ${num(1 / rate, 3)} ${cur}.`
+      : `Aucun total en euros sur ce bulletin. Reprends le taux d'un mois voisin ou le taux officiel de la période.`;
   }
 
   const box = $('#ps-computed');
   if (base <= 0) {
     box.innerHTML = 'Renseigne la base imposable pour voir la conversion.';
+    box.style.borderLeftColor = 'var(--line)';
     return;
   }
+
+  // Contrôle : base − cotisations − impôt + per diem doit égaler le virement
+  const balance = payslipBalance({ taxableBase: base, social, taxPaid: tax, allowance, net });
+
+  let verdict = '';
+  if (balance.checked) {
+    verdict = balance.ok
+      ? `<br><span style="color:var(--gain)">Saisie cohérente avec le virement.</span>`
+      : `<br><span style="color:var(--warn)">Écart de ${num(Math.abs(balance.diff))} ${cur} avec le virement.
+         Vérifie les lignes /350 et /360 des périodes antérieures, souvent oubliées.</span>`;
+  }
+
+  box.style.borderLeftColor = balance.checked && !balance.ok ? 'var(--warn)' : 'var(--gain)';
   box.innerHTML = `
     Base retenue pour la déclaration française : <strong>${eur(frenchBase)}</strong>
-    <br><span style="color:var(--ink-3)">base imposable ${num(base)} ${cur}
-    moins cotisations ${num(social)} ${cur}</span>
+    <br><span style="color:var(--ink-3)">${num(base)} − ${num(social)} = ${num(base - social)} ${cur}</span>
     ${allowance ? `<br>Per diem non imposable : ${eur(allowance * rate)}` : ''}
-    ${tax ? `<br>Impôt payé sur place : ${eur(tax * rate)}` : ''}`;
+    ${tax ? `<br>Impôt payé sur place : ${eur(tax * rate)}` : ''}
+    ${verdict}`;
 }
 
 async function savePayslip() {
@@ -717,6 +785,7 @@ async function savePayslip() {
     social: parseAmount($('#ps-social').value),
     allowance: parseAmount($('#ps-allowance').value),
     taxPaid: parseAmount($('#ps-tax').value),
+    taxDisputed: $('#ps-tax-disputed').checked,
     net: parseAmount($('#ps-net').value),
     source: $('#ps-source').value,
     receiptIds: state.sheetReceipts.map(r => r.id),
@@ -780,7 +849,7 @@ function ratesToText(rates) {
 function textToRates(text) {
   const out = {};
   for (const line of text.split('\n')) {
-    const m = line.trim().match(/^([A-Za-z]{3})\s*=\s*([\d.,]+)$/);
+    const m = line.trim().match(/^([A-Za-z]{2,6})\s*=\s*([\d.,]+)$/);
     if (m) out[m[1].toUpperCase()] = parseAmount(m[2]);
   }
   return out;
@@ -796,6 +865,12 @@ function openSettings() {
   $('#st-vfl').checked = !!settings.vfl;
   $('#st-theme').value = settings.theme || 'auto';
   $('#st-rates').value = ratesToText(settings.rates);
+
+  $('#st-courrier').checked        = !!settings.courrier.enabled;
+  $('#st-courrier-half').checked   = settings.courrier.halfReturn !== false;
+  $('#st-courrier-method').value   = settings.courrier.method || 'brute';
+  $('#st-courrier-rates').value    = ratesToText(settings.courrier.rates);
+
   openSheet('dlg-settings');
   updateSettingsStorage();
 }
@@ -818,6 +893,13 @@ async function saveSettings() {
   await saveSetting('vfl', $('#st-vfl').checked);
   await saveSetting('theme', $('#st-theme').value);
   await saveSetting('rates', textToRates($('#st-rates').value));
+
+  await saveSetting('courrier', {
+    enabled: $('#st-courrier').checked,
+    halfReturn: $('#st-courrier-half').checked,
+    method: $('#st-courrier-method').value,
+    rates: textToRates($('#st-courrier-rates').value)
+  });
 
   const bounds = { ...settings.abatement };
   bounds[state.year] = {
@@ -994,7 +1076,10 @@ function bindEvents() {
   $('#ex-amount').addEventListener('input', updateConversionHint);
 
   // Aperçu du bulletin recalculé à chaque frappe
-  ['#ps-currency', '#ps-total-cur', '#ps-total-eur', '#ps-base', '#ps-social', '#ps-allowance', '#ps-tax']
+  ['#ps-total-cur', '#ps-total-eur'].forEach(sel =>
+    $(sel).addEventListener('input', syncRateFromTotals));
+
+  ['#ps-currency', '#ps-rate', '#ps-base', '#ps-social', '#ps-allowance', '#ps-tax', '#ps-net']
     .forEach(sel => {
       $(sel).addEventListener('input', updatePayslipPreview);
       $(sel).addEventListener('change', updatePayslipPreview);
