@@ -26,23 +26,38 @@ async function pdfItems(file) {
   const buffer = await file.arrayBuffer();
   const doc = await lib.getDocument({ data: buffer }).promise;
   const items = [];
+  const pages = [];
 
   for (let p = 1; p <= doc.numPages; p++) {
     const page = await doc.getPage(p);
     const content = await page.getTextContent();
+
+    // Un planning est imprimé en paysage : la page est stockée tournée.
+    // Les coordonnées brutes du texte suivent l'orientation de stockage,
+    // pas ce qui s'affiche. Sans cette matrice, les colonnes visuelles
+    // sont lues comme des lignes et le document devient indéchiffrable.
+    const viewport = page.getViewport({ scale: 1 });
+    pages.push({ page: p, rotation: page.rotate, items: content.items.length });
+
     for (const it of content.items) {
       const str = it.str || '';
       if (!str.trim()) continue;
+      const m = lib.Util.transform(viewport.transform, it.transform);
+      const size = Math.hypot(m[2], m[3]) || Math.hypot(m[0], m[1]) || 8;
       items.push({
         page: p,
-        x: it.transform[4],
-        y: it.transform[5],
+        x: m[4],
+        // La matrice d'affichage oriente y vers le bas. On l'inverse pour
+        // conserver la convention « y élevé = haut de page » utilisée ensuite.
+        y: -m[5],
         w: it.width || 0,
-        size: Math.abs(it.transform[3]) || it.height || 8,
+        size,
         str
       });
     }
   }
+
+  items.meta = { pages, total: items.length };
   return items;
 }
 
@@ -98,6 +113,14 @@ function itemsToLines(items, tolerance = 2.5) {
     line.dense = line.items.map(i => i.str).join('');
   }
   return lines;
+}
+
+/** Résumé technique du document, utile quand un import échoue. */
+function describeSource(items) {
+  const meta = items.meta;
+  if (!meta) return '';
+  const rotations = [...new Set(meta.pages.map(p => p.rotation))].join('/');
+  return `${meta.pages.length} page(s), rotation ${rotations}°, ${meta.total} éléments de texte.`;
 }
 
 /* ===========================================================
@@ -190,7 +213,7 @@ function parseRoster(items) {
   if (!period) {
     const sample = fullText.slice(0, 220).replace(/\s+/g, ' ');
     throw new Error(
-      `Période introuvable dans ce PDF. Début du texte lu : « ${sample} »`
+      `Période introuvable. ${describeSource(items)} Début du texte lu : « ${sample} »`
     );
   }
 
@@ -211,29 +234,35 @@ function parseRoster(items) {
     }
   }
   if (!markers.length) {
-    throw new Error("Aucun jour détecté. Le planning est peut-être dans une autre mise en page.");
+    throw new Error("Aucun jour détecté dans ce planning. " + describeSource(items));
   }
 
-  // Lignes hôtel, avec le code de lieu situé à leur droite
+  // Lignes hôtel. Le planning est sur trois colonnes : une même hauteur porte
+  // souvent un hébergement pour chacune d'elles, il faut donc toutes les lire.
   const hotelLines = [];
   for (const line of lines) {
+    const positions = [];
     for (let i = 0; i < line.items.length; i++) {
-      const h = line.items[i].str.match(HOTEL_MARKER);
-      if (!h) continue;
-      const place = line.items.slice(i + 1).find(n => AIRPORT.test(n.str));
+      if (HOTEL_MARKER.test(line.items[i].str)) positions.push(i);
+    }
+    for (let k = 0; k < positions.length; k++) {
+      const i = positions[k];
+      const stop = positions[k + 1] ?? line.items.length;
+      const place = line.items.slice(i + 1, stop).find(n =>
+        AIRPORT.test(n.str) && n.x - line.items[i].x < 300);
       if (!place) continue;
       hotelLines.push({
         page: line.page, y: line.y, x: line.items[i].x,
         hotel: line.items[i].str, place: place.str
       });
-      break;
     }
   }
 
   if (!hotelLines.length) {
     throw new Error(
       `Aucune ligne hôtel trouvée sur les ${markers.length} jours lus. ` +
-      `Sans hébergement identifiable, les nuits ne peuvent pas être déduites.`
+      `Sans hébergement identifiable, les nuits ne peuvent pas être déduites. ` +
+      describeSource(items)
     );
   }
 
@@ -361,7 +390,7 @@ function parsePayslipPdf(items) {
                   || denseText.match(/Month:([A-Za-z]+)(\d{4})/i);
   if (!monthMatch) {
     const sample = fullText.slice(0, 200).replace(/\s+/g, ' ');
-    throw new Error(`Mois introuvable dans ce PDF. Début du texte lu : « ${sample} »`);
+    throw new Error(`Mois introuvable. ${describeSource(items)} Début du texte lu : « ${sample} »`);
   }
   const month = MONTHS_LONG[monthMatch[1].toUpperCase()];
   const year = Number(monthMatch[2]);

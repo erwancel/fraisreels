@@ -219,6 +219,7 @@ const SETTINGS_DEFAULTS = {
     method: 'brute',      // 'brute' : per diem réintégré en 1AJ, forfait entier en 1AK
                           // 'nette' : 1AK = forfait moins per diem reçu
     halfReturn: true,     // demi-indemnité le jour du retour en base
+    lodgedRate: 100,      // part de l'indemnité retenue quand l'hôtel est payé par la compagnie
     rates: {
       DEFAUT: 174,        // zone euro et Schengen, moyen-courrier
       GB: 207, CH: 248, NO: 222, SE: 196, DK: 228,
@@ -409,25 +410,42 @@ function courrierRate(country) {
   return r[country] ?? r.DEFAUT ?? 0;
 }
 
-/** Indemnité d'un séjour : une nuit d'escale = une indemnité pleine, plus une demie au retour. */
+/**
+ * Indemnité d'un séjour : une nuit d'escale = une indemnité pleine, plus une demie au retour.
+ *
+ * Le barème couvre à la fois les repas et l'hébergement. Quand l'hôtel est réservé
+ * et réglé par la compagnie, la part logement n'est pas une dépense supportée :
+ * la déduire intégralement serait indéfendable. Le taux appliqué dans ce cas
+ * se règle dans les paramètres.
+ */
 function tripAllowance(trip) {
   const c = settings.courrier;
-  if (!c.enabled) return { eligible: false, nights: 0, rate: 0, units: 0, amount: 0 };
+  if (!c.enabled) return { eligible: false, nights: 0, rate: 0, units: 0, amount: 0, lodged: false };
   if (NO_ALLOWANCE_PURPOSES.has(trip.purpose)) {
-    return { eligible: false, nights: trip.nights ?? 0, rate: 0, units: 0, amount: 0 };
+    return { eligible: false, nights: trip.nights ?? 0, rate: 0, units: 0, amount: 0, lodged: false };
   }
   const nights = trip.nights ?? 0;
-  if (nights <= 0) return { eligible: true, nights: 0, rate: 0, units: 0, amount: 0 };
-  const rate = courrierRate(trip.country);
+  if (nights <= 0) return { eligible: true, nights: 0, rate: 0, units: 0, amount: 0, lodged: false };
+
+  const full = courrierRate(trip.country);
+  const lodged = !!trip.lodged;
+  const share = lodged ? Math.max(0, Math.min(100, c.lodgedRate ?? 100)) / 100 : 1;
+  const rate = full * share;
   const units = nights + (c.halfReturn ? 0.5 : 0);
-  return { eligible: true, nights, rate, units, amount: units * rate };
+
+  return { eligible: true, nights, rate, fullRate: full, lodged, units, amount: units * rate };
 }
 
 function courrierTotals(trips) {
-  let gross = 0, nights = 0, counted = 0;
+  let gross = 0, nights = 0, counted = 0, lodgedNights = 0, forgone = 0;
   const byCountry = {};
   for (const t of trips) {
     const a = tripAllowance(t);
+    if (!a.eligible || !a.nights) continue;
+    if (a.lodged) {
+      lodgedNights += a.nights;
+      forgone += a.units * ((a.fullRate || 0) - a.rate);
+    }
     if (!a.amount) continue;
     gross += a.amount;
     nights += a.nights;
@@ -437,7 +455,7 @@ function courrierTotals(trips) {
   const rows = Object.entries(byCountry)
     .map(([code, total]) => ({ code, name: COUNTRY_BY_CODE[code] || code, rate: courrierRate(code), total }))
     .sort((a, b) => b.total - a.total);
-  return { gross, nights, counted, rows };
+  return { gross, nights, counted, lodgedNights, forgone, rows };
 }
 
 /* ---------- Calculs annuels ---------- */

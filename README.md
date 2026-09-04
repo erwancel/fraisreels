@@ -90,10 +90,19 @@ en escale.
 Un écran de prévisualisation montre ce qui a été détecté avant enregistrement. Les séjours déjà
 présents ne sont pas dupliqués. Seul le pays est enregistré, la ville n'entre pas dans le calcul.
 
-Ces plannings sont produits en police à chasse fixe et le texte y est souvent fragmenté, parfois
-lettre par lettre. Les mots sont donc recomposés d'après l'espacement réel entre les fragments.
-Si un import échoue, le message d'erreur cite le début du texte réellement lu, ce qui permet de
-voir tout de suite si le document a été mal découpé.
+Deux particularités de ces documents sont prises en charge. Ils sont imprimés **en paysage** :
+la page est stockée tournée, et les coordonnées brutes du texte suivent l'orientation de stockage,
+pas ce qui s'affiche. La matrice d'affichage est donc appliquée, faute de quoi les colonnes
+visuelles seraient lues comme des lignes. Et le texte, en police à chasse fixe, arrive souvent
+fragmenté, parfois lettre par lettre : les mots sont recomposés d'après l'espacement réel entre
+les fragments.
+
+Le planning étant sur trois colonnes, une même hauteur porte fréquemment un hébergement pour
+chacune : toutes sont lues, et un contrôle de distance empêche qu'un code de lieu soit attribué
+à la colonne voisine.
+
+Si un import échoue, le message d'erreur indique le nombre de pages, la rotation détectée, le
+nombre d'éléments de texte lus et le début du texte, ce qui suffit à identifier le problème.
 
 ### Bulletin de paie
 
@@ -199,7 +208,13 @@ dans la documentation syndicale : remplace-les par le document officiel de l'ann
 Réglages → Frais en courrier. Un pays par ligne au format `CH=248`, la ligne `DEFAUT` couvrant la
 zone euro et Schengen.
 
-Trois garde-fous sont intégrés :
+Quatre garde-fous sont intégrés :
+
+- **Hébergement fourni.** Le barème couvre les repas *et* l'hébergement. Quand l'hôtel est réservé
+  et réglé par la compagnie, la part logement n'est pas une dépense supportée. Chaque séjour porte
+  un indicateur « hôtel payé par la compagnie », coché par défaut à l'import puisque les hôtels du
+  roster sont des réservations employeur, et la part d'indemnité retenue dans ce cas se règle en
+  pourcentage. À 100 %, tout est déduit, ce qui est difficile à défendre si tu ne paies pas l'hôtel.
 
 - **Pas de double déduction.** Quand le forfait est actif, les dépenses de repas, hébergement et
   transports en escale cessent d'être comptées séparément. Le montant écarté reste affiché.
@@ -209,6 +224,9 @@ Trois garde-fous sont intégrés :
 - **Séjours non éligibles écartés.** La présence en base d'affectation relève de la double
   résidence, pas de l'escale, et les missions Air One Aero ne sont pas du salariat. Ces séjours
   sont exclus du calcul.
+
+Le tableau de bord signale par ailleurs tout total de frais dépassant 55 % du salaire déclaré.
+Une déclaration de cet ordre attire l'attention et doit pouvoir être justifiée ligne par ligne.
 
 ## Le comparateur
 

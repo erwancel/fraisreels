@@ -182,18 +182,34 @@ function renderBoard() {
 }
 
 function renderBackupWarning() {
+  const d = state.data;
   const el = $('#board-backup-warning');
+  const blocks = [];
+
+  // Des frais réels approchant le salaire déclaré appellent une vérification :
+  // c'est le premier motif de contrôle sur ce type de déclaration.
+  if (d.declaredSalary > 0 && d.deductible > 0.55 * d.declaredSalary) {
+    const pct = Math.round((d.deductible / d.declaredSalary) * 100);
+    blocks.push(`<div class="notice alert">
+      Tes frais réels représentent <strong>${pct} %</strong> de ton salaire déclaré.
+      ${d.courrier.lodgedNights
+        ? `${d.courrier.lodgedNights} de tes nuits sont en hôtel payé par la compagnie : vérifie la part
+           d'indemnité retenue dans ce cas.`
+        : `Vérifie le barème appliqué et le traitement des hébergements pris en charge.`}
+      Un total de cet ordre doit pouvoir être justifié ligne par ligne.
+    </div>`);
+  }
+
   const last = settings.lastBackup;
   const age = last ? (Date.now() - new Date(last).getTime()) / 86400000 : Infinity;
-
-  if (state.data.expenses.length && age > 30) {
-    el.innerHTML = `<div class="notice alert">
+  if (d.expenses.length && age > 30) {
+    blocks.push(`<div class="notice alert">
       ${last ? `Dernière sauvegarde il y a ${Math.round(age)} jours.` : 'Aucune sauvegarde enregistrée.'}
       Tes données ne vivent que sur cet appareil — enregistre une copie dans iCloud depuis l'onglet Bilan.
-    </div>`;
-  } else {
-    el.innerHTML = '';
+    </div>`);
   }
+
+  el.innerHTML = blocks.join('');
 }
 
 /* ===========================================================
@@ -287,6 +303,10 @@ function renderTrips() {
         ${eur(d.allowances)}. ${d.useBrute
           ? 'Ce per diem est réintégré à ton salaire déclaré et le forfait se déduit en entier.'
           : `Déduction retenue : ${eur(d.courrierNet)}.`}
+        ${d.courrier.lodgedNights
+          ? `<br>${d.courrier.lodgedNights} nuits en hôtel payé par la compagnie, indemnité ramenée à
+             ${settings.courrier.lodgedRate} %${d.courrier.forgone > 0 ? ` — ${eur(d.courrier.forgone)} non déduits` : ''}.`
+          : ''}
       </p>` : ''}`
     : `<div class="empty">Rien à décompter pour ${d.year}.</div>`;
 
@@ -303,7 +323,7 @@ function renderTrips() {
         <span class="log-date"><b>${day}</b>${month}</span>
         <span class="log-main">
           <span class="log-label">${escapeHtml(COUNTRY_BY_CODE[t.country] || t.country)}</span>
-          <span class="log-meta">${escapeHtml(PURPOSES[t.purpose] || '')}<span class="dot"></span>${t.start.split('-').reverse().slice(0, 2).join('/') } → ${(t.end || t.start).split('-').reverse().slice(0, 2).join('/')}</span>
+          <span class="log-meta">${escapeHtml(PURPOSES[t.purpose] || '')}<span class="dot"></span>${t.start.split('-').reverse().slice(0, 2).join('/') } → ${(t.end || t.start).split('-').reverse().slice(0, 2).join('/')}${t.lodged ? '<span class="dot"></span>hôtel fourni' : ''}</span>
         </span>
         <span class="log-amount">${a.amount ? eur(a.amount) : days + ' j'}<small>${a.amount ? `${a.units} × ${eur0(a.rate)}` : `${nights} nuit${nights > 1 ? 's' : ''}`}</small></span>
       </button>`;
@@ -620,6 +640,7 @@ function openTrip(trip) {
   $('#tr-end').value     = trip?.end || todayISO();
   $('#tr-country').value = trip?.country || 'DE';
   $('#tr-purpose').value = trip?.purpose || 'rotation';
+  $('#tr-lodged').checked = trip ? !!trip.lodged : true;
   $('#tr-notes').value   = trip?.notes || '';
   $('#tr-nights').value  = trip?.nights ?? autoNights();
 
@@ -645,6 +666,7 @@ async function saveTrip() {
     year: yearOf(start),
     country: $('#tr-country').value,
     purpose: $('#tr-purpose').value,
+    lodged: $('#tr-lodged').checked,
     nights: Number($('#tr-nights').value) || 0,
     notes: $('#tr-notes').value.trim(),
     updatedAt: Date.now()
@@ -876,6 +898,7 @@ function openSettings() {
   $('#st-courrier').checked        = !!settings.courrier.enabled;
   $('#st-courrier-half').checked   = settings.courrier.halfReturn !== false;
   $('#st-courrier-method').value   = settings.courrier.method || 'brute';
+  $('#st-courrier-lodged').value   = settings.courrier.lodgedRate ?? 100;
   $('#st-courrier-rates').value    = ratesToText(settings.courrier.rates);
 
   openSheet('dlg-settings');
@@ -906,6 +929,7 @@ async function saveSettings() {
     enabled: $('#st-courrier').checked,
     halfReturn: $('#st-courrier-half').checked,
     method: $('#st-courrier-method').value,
+    lodgedRate: Math.min(100, Math.max(0, Number($('#st-courrier-lodged').value) || 0)),
     rates: textToRates($('#st-courrier-rates').value)
   });
 
@@ -1050,6 +1074,7 @@ async function importRoster(file, button) {
             country: t.country,
             city: '',
             purpose: t.purpose,
+            lodged: true,
             nights: t.nights,
             notes: `Importé du roster — escale ${t.place}`,
             updatedAt: Date.now()
