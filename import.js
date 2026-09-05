@@ -397,18 +397,45 @@ function parseEuroAmount(str) {
 }
 
 /** Relève les montants en euros d'une ligne, en conservant leur position. */
+/**
+ * Relève les montants d'une ligne de tableau, avec leur position.
+ *
+ * Un montant à quatre chiffres est écrit avec un séparateur de milliers, ce qui
+ * l'éclate souvent en plusieurs fragments : « 1 », « 159 », « € ». Les fragments
+ * numériques voisins sont donc recollés avant lecture, sans jamais franchir
+ * l'écart qui sépare deux colonnes.
+ */
 function moneyTokens(line) {
   const out = [];
   const items = line.items;
-  for (let i = 0; i < items.length; i++) {
-    const w = items[i];
-    let m = w.str.match(/^(-?[\d\s\u00a0.]*\d(?:,\d+)?)\s*€$/);
-    if (m) { out.push({ x: w.x, value: parseEuroAmount(m[1]) }); continue; }
-    m = w.str.match(/^(-?[\d\s\u00a0.]*\d(?:,\d+)?)$/);
-    if (m && items[i + 1] && /^€$/.test(items[i + 1].str)) {
-      out.push({ x: w.x, value: parseEuroAmount(m[1]) });
-      i++;
+  let i = 0;
+
+  while (i < items.length) {
+    const start = items[i];
+    if (!/^-?[\d.,]/.test(start.str)) { i++; continue; }
+
+    let text = start.str;
+    let j = i;
+    let last = start;
+
+    // Agrégation des fragments contigus, chiffres puis symbole monétaire
+    while (j + 1 < items.length) {
+      const next = items[j + 1];
+      const gap = next.x - (last.x + last.w);
+      if (gap > 1.6 * (next.size || 9)) break;
+      if (/^€$/.test(next.str)) { text += '€'; j++; last = next; break; }
+      if (!/^[\d.,]+€?$/.test(next.str)) break;
+      text += next.str;
+      j++; last = next;
+      if (text.endsWith('€')) break;
     }
+
+    const m = text.match(/^(-?[\d\s\u00a0\u202f.]*\d(?:,\d+)?)\s*€?$/);
+    if (m && (text.includes('€') || /^\d+(,\d+)?$/.test(text))) {
+      const value = parseEuroAmount(m[1]);
+      if (value !== null) out.push({ x: start.x, value });
+    }
+    i = j + 1;
   }
   return out;
 }
@@ -450,45 +477,76 @@ function parseUrssafPdf(items) {
   const siret = (flat.match(/SIRET\s*(\d[\d\s]{12,})/) || [])[1]?.replace(/\s/g, '') || '';
   const vfl = /VERSEMENT LIBERATOIRE/.test(flat) && !/N'AVEZ PAS OPTE/.test(flat);
 
-  // Gabarit de colonnes, donné par la ligne de totaux
-  const totalsLine = lines.find(l => /Montant\s+totaux/i.test(l.text));
-  if (!totalsLine) throw new Error("Ligne « Montant totaux » introuvable sur ce récapitulatif.");
-  const totals = moneyTokens(totalsLine);
-  if (totals.length < 1) throw new Error("Aucun montant lisible sur la ligne de totaux.");
+  // Gabarit de colonnes. La ligne de totaux est le repère le plus sûr, mais
+  // certains récapitulatifs ne la portent pas : on se rabat alors sur l'en-tête.
+  const totalsLine = lines.find(l => /Montants?\s+totaux/i.test(l.text));
+  const totals = totalsLine ? moneyTokens(totalsLine) : [];
 
-  const caColumnX = totals[0].x;
+  let caColumnX = totals[0]?.x;
+  if (caColumnX === undefined) {
+    const header = lines.find(l => /Chiffre\s*$|Chiffre\s+d.affaires/i.test(l.text));
+    const cell = header?.items.find(w => /Chiffre/i.test(w.str));
+    caColumnX = cell ? cell.x : null;
+  }
+  if (caColumnX === null || caColumnX === undefined) {
+    throw new Error(
+      "Colonne « Chiffre d'affaires » introuvable. " +
+      "Ouvre la déclaration à la main depuis l'écran Revenus pour la saisir."
+    );
+  }
   const pick = (n) => totals[n]?.value ?? 0;
 
-  // Nature du chiffre d'affaires : chaque libellé ouvre un bloc jusqu'au suivant
+  /* Ventilation par nature.
+     Les libellés s'étalent sur plusieurs lignes alors que les montants restent
+     alignés sur la première : chercher le montant après le libellé le
+     rattacherait au bloc précédent. On part donc des lignes qui portent un
+     montant dans la colonne du chiffre d'affaires, chacune ouvrant un bloc,
+     puis on identifie la nature à l'intérieur de ce bloc.
+     Le taux de cotisation tranche en dernier ressort : il est propre à chaque
+     régime et ne prête à aucune ambiguïté, contrairement aux libellés. */
   const NATURES = [
-    { key: 'bnc',        test: /ACTIVITES LIBERALES/ },
-    { key: 'bicVente',   test: /VENTES DE MARCHANDISES/ },
-    { key: 'bicService', test: /PRESTATIONS DE SERVICES/ }
+    { key: 'bnc',        test: /ACTIVITES LIBERALES|\(BNC\)/ },
+    { key: 'bicVente',   test: /VENTES? DE MARCHANDISES|BIC VENTES/ },
+    { key: 'bicService', test: /PRESTATIONS DE SERVICES|BIC PRESTATIONS/ }
   ];
 
-  const anchors = [];
+  const RATE_TO_NATURE = [
+    { key: 'bnc',        rate: microRates().bnc.cotisations * 100 },
+    { key: 'bicService', rate: microRates().bic_service.cotisations * 100 },
+    { key: 'bicVente',   rate: microRates().bic_vente.cotisations * 100 }
+  ];
+
+  // Lignes de tête : celles qui portent un montant dans la colonne CA
+  const heads = [];
   lines.forEach((l, i) => {
-    const t = deaccent(l.text);
-    for (const n of NATURES) {
-      if (n.test.test(t) && !anchors.some(a => a.key === n.key)) {
-        anchors.push({ key: n.key, index: i });
-      }
-    }
+    if (l === totalsLine) return;
+    const tok = moneyTokens(l).find(t => Math.abs(t.x - caColumnX) < 60);
+    if (tok) heads.push({ index: i, value: tok.value });
   });
-  anchors.sort((a, b) => a.index - b.index);
 
   const amounts = { bnc: 0, bicVente: 0, bicService: 0 };
-  for (let a = 0; a < anchors.length; a++) {
-    const from = anchors[a].index;
-    const to = anchors[a + 1]?.index ?? Math.min(lines.length, from + 8);
-    let best = null;
-    for (let i = from; i < to; i++) {
-      for (const tok of moneyTokens(lines[i])) {
-        const d = Math.abs(tok.x - caColumnX);
-        if (d < 60 && (!best || d < best.d)) best = { d, value: tok.value };
-      }
-    }
-    if (best) amounts[anchors[a].key] = best.value;
+  const attribution = [];
+
+  for (let h = 0; h < heads.length; h++) {
+    const from = heads[h].index;
+    const to = heads[h + 1]?.index ?? Math.min(lines.length, from + 6);
+    const blockText = deaccent(lines.slice(from, to).map(l => l.text).join(' '));
+
+    // Taux affichés dans le bloc
+    const percents = [...blockText.matchAll(/(\d+[.,]\d+)\s*%/g)]
+      .map(m => parseFloat(m[1].replace(',', '.')));
+
+    let key = NATURES.find(n => n.test.test(blockText))?.key || null;
+
+    // Le taux de cotisation prime : un libellé peut déborder d'un bloc à l'autre
+    const byRate = percents
+      .map(p => RATE_TO_NATURE.find(r => Math.abs(r.rate - p) < 0.35)?.key)
+      .find(Boolean);
+    if (byRate) key = byRate;
+
+    if (!key) continue;
+    amounts[key] += heads[h].value;
+    attribution.push({ key, value: heads[h].value, byRate: !!byRate, percents });
   }
 
   const result = {
@@ -500,11 +558,13 @@ function parseUrssafPdf(items) {
     bnc: amounts.bnc,
     bicVente: amounts.bicVente,
     bicService: amounts.bicService,
-    totalCa: pick(0),
+    totalCa: pick(0) || (amounts.bnc + amounts.bicVente + amounts.bicService),
     totalDue: pick(1),
     cotisations: pick(2),
     cfp: pick(3),
-    vflAmount: pick(4)
+    vflAmount: pick(4),
+    attribution,
+    hasTotalsLine: !!totalsLine
   };
 
   // Contrôles : la ventilation doit reconstituer le total, et les

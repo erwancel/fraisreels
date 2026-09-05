@@ -116,6 +116,19 @@ nombre d'éléments de texte lus et le début du texte, ce qui suffit à identif
 période, le SIRET, l'option de versement libératoire, la ventilation du chiffre d'affaires par
 nature (BNC, BIC ventes, BIC prestations) et le détail des prélèvements.
 
+La ventilation par nature ne se fie pas aux libellés. Sur ces récapitulatifs, le libellé d'une
+nature s'étale sur trois ou quatre lignes alors que les montants restent alignés sur la première :
+chercher le montant sous le libellé le rattacherait au bloc précédent. L'app part donc des lignes
+qui portent un montant dans la colonne du chiffre d'affaires, et identifie la nature par le
+**taux de cotisation** affiché — 25,6 % en BNC, 21,2 % en prestations BIC, 12,3 % en ventes.
+Ce taux est propre à chaque régime et ne prête à aucune ambiguïté.
+
+Les montants à quatre chiffres sont recollés avant lecture : le séparateur de milliers les éclate
+en fragments, et « 1 159 € » serait lu 159 €.
+
+La ligne « Montant totaux » n'est pas indispensable : à défaut, les totaux se déduisent de la
+ventilation.
+
 Trois contrôles sont menés avant l'enregistrement : la ventilation par nature doit reconstituer le
 chiffre d'affaires total, la somme des cotisations, de la CFP et du versement libératoire doit
 égaler le montant dû, et les prélèvements doivent correspondre aux taux du régime. Toute
