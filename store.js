@@ -371,6 +371,7 @@ const SETTINGS_DEFAULTS = {
   baseAirports: '',
   vfl: false,
   theme: 'auto',
+  lastView: 'board',      // vue à rouvrir au démarrage
   rates: { CHF: 1.06, GBP: 1.17, USD: 0.92, PLN: 0.23, CZK: 0.0413, DKK: 0.134,
            SEK: 0.088, NOK: 0.086, HUF: 0.0026, RON: 0.20, TRY: 0.028, MAD: 0.093, AED: 0.25 },
   abatement: {},          // { 2026: {min,max} } — surcharge manuelle
@@ -647,18 +648,22 @@ function countryTally(trips) {
   const byCountry = {};      // code -> Set de dates
   const nights = {};
   const allDays = new Set();
+  const homeDays = new Set();
 
   for (const t of trips) {
     const start = new Date(t.start + 'T12:00:00');
     const end = new Date((t.end || t.start) + 'T12:00:00');
     if (isNaN(start) || isNaN(end) || end < start) continue;
 
+    const atHome = t.purpose === 'domicile';
     byCountry[t.country] ??= new Set();
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
       const key = d.toISOString().slice(0, 10);
       byCountry[t.country].add(key);
       allDays.add(key);
+      if (atHome) homeDays.add(key);
     }
+    if (atHome) continue;
     const auto = Math.max(0, Math.round((end - start) / 86400000));
     nights[t.country] = (nights[t.country] || 0) + (t.nights ?? auto);
   }
@@ -670,7 +675,16 @@ function countryTally(trips) {
     nights: nights[code] || 0
   })).sort((a, b) => b.days - a.days);
 
-  return { rows, totalDays: allDays.size, totalNights: Object.values(nights).reduce((a, b) => a + b, 0) };
+  const totalDays = allDays.size;
+  const home = homeDays.size;
+
+  return {
+    rows,
+    totalDays,                    // toutes les journées enregistrées
+    homeDays: home,               // journées passées au domicile
+    awayDays: totalDays - home,   // journées en déplacement
+    totalNights: Object.values(nights).reduce((a, b) => a + b, 0)
+  };
 }
 
 /** Consolidation complète d'une année. */

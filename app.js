@@ -20,7 +20,7 @@ const state = {
 };
 
 const VIEW_TITLES = {
-  board: 'Tableau de bord',
+  board: 'Accueil',
   expenses: 'Dépenses',
   trips: 'Séjours',
   income: 'Revenus',
@@ -77,6 +77,8 @@ function switchView(view) {
   $('#quick-add').hidden = (view === 'report' || view === 'income');
   $('#bulkbar').hidden = true;
   window.scrollTo(0, 0);
+  // Un rechargement doit rendre la page qu'on regardait, pas l'accueil
+  if (settings.lastView !== view) saveSetting('lastView', view).catch(() => {});
   refresh();
 }
 
@@ -226,7 +228,9 @@ function renderBoard() {
     </div>`;
 
   const stats = [
-    { label: 'Jours hors domicile', value: d.countries.totalDays, sub: `${d.countries.totalNights} nuitées` },
+    { label: 'Jours en déplacement', value: d.countries.awayDays,
+      sub: `${d.countries.totalNights} nuitées${d.courrierOn && d.courrier.nights !== d.countries.totalNights ? `, dont ${d.courrier.nights} indemnisées` : ''}` },
+    { label: 'Jours au domicile', value: d.countries.homeDays, sub: `${d.countries.totalDays} jours couverts` },
     { label: 'Dépenses saisies', value: d.expenses.length, sub: d.missingProof ? `${d.missingProof} sans pièce` : 'toutes justifiées' },
     { label: 'Salaire déclaré', value: eur0(d.declaredSalary), sub: `${d.payslips.length} bulletins` },
     { label: 'CA Air One Aero', value: eur0(d.turnover), sub: `${d.revenues.length} recettes` }
@@ -287,7 +291,10 @@ function renderBoard() {
           <tr><td>${escapeHtml(c.name)}</td><td class="num">${c.days}</td><td class="num">${c.nights}</td></tr>`).join('')}
         </tbody>
         <tfoot><tr><td>Total</td><td class="num">${d.countries.totalDays}</td><td class="num">${d.countries.totalNights}</td></tr></tfoot>
-      </table>`
+      </table>
+      ${d.countries.homeDays ? `<p class="verdict-note" style="margin-top:10px">
+        Dont ${d.countries.homeDays} jours au domicile en France, sans nuitée d'escale.
+      </p>` : ''}`
     : `<div class="empty"><strong>Aucun séjour enregistré</strong>Le décompte par pays se construit depuis l'onglet Séjours.</div>`;
 
   // Dernières dépenses
@@ -426,6 +433,9 @@ function renderTrips() {
         </tbody>
         <tfoot><tr><td>Total</td><td class="num">${c.totalDays}</td><td class="num">${c.totalNights}</td>${d.courrierOn ? `<td class="num">${eur(d.courrier.gross)}</td>` : ''}</tr></tfoot>
       </table>
+      <p class="verdict-note" style="margin-top:10px">
+        ${c.awayDays} jours en déplacement pour ${c.totalNights} nuitées${c.homeDays ? `, et ${c.homeDays} jours au domicile` : ''}.
+      </p>
       ${d.courrierOn ? `<p class="verdict-note" style="margin-top:10px">
         Forfait d'escale sur ${d.courrier.nights} nuits. Per diem déjà reçu de ton employeur :
         ${eur(d.allowances)}. ${d.useBrute
@@ -773,9 +783,9 @@ function renderReport() {
 
   $('#report-detail').innerHTML = (d.categories.length || d.courrierDeduction)
     ? `<table class="grid">
-        <thead><tr><th>Poste</th><th class="num">Lignes</th><th class="num">Montant</th></tr></thead>
+        <thead><tr><th>Poste</th><th class="num">Nombre</th><th class="num">Montant</th></tr></thead>
         <tbody>
-        ${d.courrierDeduction ? `<tr><td>Frais en courrier<br><small style="color:var(--ink-3)">${d.courrier.nights} nuits d'escale sur ${d.courrier.counted} séjours</small></td><td class="num" style="color:var(--ink-3)">${d.courrier.counted}</td><td class="num">${eur(d.courrierDeduction)}</td></tr>` : ''}
+        ${d.courrierDeduction ? `<tr><td>Frais en courrier<br><small style="color:var(--ink-3)">${d.courrier.nights} nuits d'escale sur ${d.courrier.counted} séjours</small></td><td class="num" style="color:var(--ink-3)">${d.courrier.counted} séjours</td><td class="num">${eur(d.courrierDeduction)}</td></tr>` : ''}
         ${d.categories.map(c => {
           const n = d.expenses.filter(e => e.category === c.id && e.attach !== 'aoa' && !e.reimbursed).length;
           return `<tr><td>${escapeHtml(c.label)}</td><td class="num" style="color:var(--ink-3)">${n}</td><td class="num">${eur(c.total)}</td></tr>`;
@@ -1845,7 +1855,7 @@ async function init() {
   $('#year-picker').value = state.year;
 
   bindEvents();
-  switchView('board');
+  switchView(VIEW_TITLES[settings.lastView] ? settings.lastView : 'board');
 
   // Demande de persistance : évite que Safari purge les données après inactivité
   if (navigator.storage?.persist && !(await navigator.storage.persisted())) {

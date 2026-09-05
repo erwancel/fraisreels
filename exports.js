@@ -130,6 +130,8 @@ function tripsCsv(data) {
   rows.push(['Pays', 'Jours de présence', 'Nuitées']);
   for (const c of data.countries.rows) rows.push([c.name, c.days, c.nights]);
   rows.push(['Total', data.countries.totalDays, data.countries.totalNights]);
+  rows.push(['dont jours en déplacement', data.countries.awayDays]);
+  rows.push(['dont jours au domicile', data.countries.homeDays]);
   return toCsv(rows);
 }
 
@@ -296,9 +298,16 @@ async function buildPdf(data) {
       foot: [data.courrierOn
         ? ['Total', String(data.countries.totalDays), String(data.countries.totalNights), eur(data.courrier.gross)]
         : ['Total', String(data.countries.totalDays), String(data.countries.totalNights)]],
+      didDrawPage: () => {},
       footStyles: { fillColor: [240, 240, 240], textColor: 20, fontStyle: 'bold' }
     });
-    y = doc.lastAutoTable.finalY + 10;
+    y = doc.lastAutoTable.finalY + 4;
+    doc.setFont('helvetica', 'italic').setFontSize(8).setTextColor(130);
+    doc.text(
+      `${data.countries.awayDays} jours en deplacement, ${data.countries.homeDays} au domicile.`,
+      M, y
+    );
+    y += 10;
   }
 
   // Chiffre d'affaires

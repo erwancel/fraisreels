@@ -174,6 +174,12 @@ immédiatement. Les taux se modifient dans les réglages, une ligne par devise a
 **Remboursé par l'employeur.** Cocher la case exclut la ligne du total déductible tout en gardant la
 trace de la dépense.
 
+**Compteurs de jours.** Trois nombres coexistent et désignent des choses différentes : les
+*jours couverts* sont toutes les journées enregistrées, domicile compris ; les *jours en
+déplacement* en retranchent le domicile ; les *nuits indemnisées* ne retiennent que les escales
+ouvrant droit au forfait, à l'exclusion de la présence en base et des missions. Le tableau de bord
+et l'écran Séjours affichent la décomposition.
+
 **Séjours.** Le journal est découpé par mois, chacun refermé par son décompte de séjours, de nuits
 et d'indemnités. Le plus simple est d'importer le roster. Sinon, chaque rotation se saisit avec ses dates. Le décompte des jours par
 pays se construit tout seul, sans compter deux fois une journée passée dans deux pays.
