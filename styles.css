@@ -439,6 +439,26 @@ main {
 }
 .log-total .money { font-size: 1rem; font-weight: 600; color: var(--ink); }
 
+/* Séparateur de mois dans un journal */
+.log-month {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 2px 6px;
+  font-size: .72rem;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--brass);
+}
+.log-month::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+.log-month:first-child { padding-top: 2px; }
+
 /* ---------- Tableau (catégories, pays) ---------- */
 
 table.grid { width: 100%; border-collapse: collapse; font-size: .84rem; }

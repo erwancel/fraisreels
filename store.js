@@ -4,8 +4,8 @@
    =========================================================== */
 
 const DB_NAME = 'frais-reels';
-const DB_VERSION = 1;
-const STORES = ['expenses', 'receipts', 'trips', 'payslips', 'revenues', 'settings'];
+const DB_VERSION = 2;
+const STORES = ['expenses', 'receipts', 'trips', 'payslips', 'revenues', 'urssaf', 'settings'];
 
 /* ---------- Référentiels ---------- */
 
@@ -90,6 +90,14 @@ const REGIMES = {
   bnc:         { label: 'Prestations libérales (BNC)',   abattement: 0.34, box: '5HQ', boxVfl: '5TE' }
 };
 
+// Taux du régime micro-social, relevés sur les récapitulatifs URSSAF.
+// Ils évoluent : ils servent au recoupement, jamais au calcul de ce qui est dû.
+const MICRO_RATES = {
+  bnc:         { cotisations: 0.256, cfp: 0.002, vfl: 0.022 },
+  bic_service: { cotisations: 0.212, cfp: 0.003, vfl: 0.017 },
+  bic_vente:   { cotisations: 0.123, cfp: 0.001, vfl: 0.010 }
+};
+
 const PURPOSES = {
   rotation:  'Rotation / découché',
   base:      'Présence en base',
@@ -136,6 +144,10 @@ function openDB() {
       }
       if (!db.objectStoreNames.contains('revenues')) {
         const s = db.createObjectStore('revenues', { keyPath: 'id' });
+        s.createIndex('year', 'year');
+      }
+      if (!db.objectStoreNames.contains('urssaf')) {
+        const s = db.createObjectStore('urssaf', { keyPath: 'id' });
         s.createIndex('year', 'year');
       }
       if (!db.objectStoreNames.contains('settings')) {
@@ -493,11 +505,12 @@ function countryTally(trips) {
 
 /** Consolidation complète d'une année. */
 async function computeYear(year) {
-  const [expenses, trips, payslips, revenues] = await Promise.all([
+  const [expenses, trips, payslips, revenues, declarations] = await Promise.all([
     db.byYear('expenses', year),
     db.byYear('trips', year),
     db.byYear('payslips', year),
-    db.byYear('revenues', year)
+    db.byYear('revenues', year),
+    db.byYear('urssaf', year)
   ]);
 
   // Frais réels sur justificatifs.
@@ -577,11 +590,33 @@ async function computeYear(year) {
     : 0;
   const advantage = totalDeductible - abatement;
 
-  // Chiffre d'affaires micro
-  const byRegime = {};
-  for (const r of revenues) {
-    byRegime[r.regime] = (byRegime[r.regime] || 0) + (r.amount || 0);
+  // Chiffre d'affaires micro.
+  // Une déclaration URSSAF fait foi : c'est le montant réellement déclaré.
+  // Les recettes saisies à la main servent alors de contrôle, pas de source.
+  const declaredByRegime = {};
+  let cotisations = 0, cfp = 0, vflPaid = 0, declaredTotal = 0;
+  for (const d of declarations) {
+    declaredByRegime.bnc         = (declaredByRegime.bnc || 0) + (d.bnc || 0);
+    declaredByRegime.bic_service = (declaredByRegime.bic_service || 0) + (d.bicService || 0);
+    declaredByRegime.bic_vente   = (declaredByRegime.bic_vente || 0) + (d.bicVente || 0);
+    cotisations += d.cotisations || 0;
+    cfp += d.cfp || 0;
+    vflPaid += d.vflAmount || 0;
+    declaredTotal += (d.bnc || 0) + (d.bicService || 0) + (d.bicVente || 0);
   }
+  for (const k of Object.keys(declaredByRegime)) {
+    if (!declaredByRegime[k]) delete declaredByRegime[k];
+  }
+
+  const invoicedByRegime = {};
+  for (const r of revenues) {
+    invoicedByRegime[r.regime] = (invoicedByRegime[r.regime] || 0) + (r.amount || 0);
+  }
+  const invoicedTotal = Object.values(invoicedByRegime).reduce((a, b) => a + b, 0);
+
+  const fromUrssaf = declarations.length > 0;
+  const byRegime = fromUrssaf ? declaredByRegime : invoicedByRegime;
+
   const revenueRows = Object.entries(byRegime).map(([id, total]) => ({
     id,
     label: REGIMES[id]?.label || id,
@@ -592,8 +627,11 @@ async function computeYear(year) {
   const turnover = Object.values(byRegime).reduce((a, b) => a + b, 0);
   const netMicro = revenueRows.reduce((a, r) => a + r.net, 0);
 
+  // Écart entre ce qui a été déclaré et ce qui a été facturé
+  const revenueGap = fromUrssaf && revenues.length ? declaredTotal - invoicedTotal : 0;
+
   return {
-    year, expenses, trips, payslips, revenues,
+    year, expenses, trips, payslips, revenues, declarations,
     expensesDeductible: deductible,
     deductible: totalDeductible,
     courrierOn, courrier, courrierNet, courrierDeduction, method, useBrute,
@@ -603,13 +641,14 @@ async function computeYear(year) {
     foreignTax, taxToRecover, foreignSalary, unbalanced,
     abatement, abatementBounds: bounds, advantage,
     countries: countryTally(trips),
-    revenueRows, turnover, netMicro
+    revenueRows, turnover, netMicro,
+    fromUrssaf, cotisations, cfp, vflPaid, invoicedTotal, revenueGap
   };
 }
 
 /** Années présentes dans la base, plus l'année courante. */
 async function knownYears() {
-  const sets = await Promise.all(['expenses', 'trips', 'payslips', 'revenues'].map(s => db.all(s)));
+  const sets = await Promise.all(['expenses', 'trips', 'payslips', 'revenues', 'urssaf'].map(s => db.all(s)));
   const years = new Set(sets.flat().map(r => r.year).filter(Boolean));
   years.add(new Date().getFullYear());
   return [...years].sort((a, b) => b - a);

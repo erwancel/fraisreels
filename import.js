@@ -344,8 +344,172 @@ function nightsToTrips(nights, baseAirports = []) {
 }
 
 /* ===========================================================
-   Bulletin de paie Eurowings
+   Récapitulatif de déclaration URSSAF
    =========================================================== */
+
+const MICRO_RATES_FALLBACK = {
+  bnc:         { cotisations: 0.256, cfp: 0.002, vfl: 0.022 },
+  bic_service: { cotisations: 0.212, cfp: 0.003, vfl: 0.017 },
+  bic_vente:   { cotisations: 0.123, cfp: 0.001, vfl: 0.010 }
+};
+const microRates = () => (typeof MICRO_RATES !== 'undefined' ? MICRO_RATES : MICRO_RATES_FALLBACK);
+
+const MONTHS_FR = {
+  JANVIER: 1, FEVRIER: 2, MARS: 3, AVRIL: 4, MAI: 5, JUIN: 6,
+  JUILLET: 7, AOUT: 8, SEPTEMBRE: 9, OCTOBRE: 10, NOVEMBRE: 11, DECEMBRE: 12
+};
+
+const deaccent = (s) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+
+/** « 1 234,56 € » → 1234.56 */
+function parseEuroAmount(str) {
+  const n = parseFloat(String(str).replace(/[\s\u00a0]/g, '').replace(',', '.'));
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Relève les montants en euros d'une ligne, en conservant leur position. */
+function moneyTokens(line) {
+  const out = [];
+  const items = line.items;
+  for (let i = 0; i < items.length; i++) {
+    const w = items[i];
+    let m = w.str.match(/^(-?[\d\s\u00a0.]*\d(?:,\d+)?)\s*€$/);
+    if (m) { out.push({ x: w.x, value: parseEuroAmount(m[1]) }); continue; }
+    m = w.str.match(/^(-?[\d\s\u00a0.]*\d(?:,\d+)?)$/);
+    if (m && items[i + 1] && /^€$/.test(items[i + 1].str)) {
+      out.push({ x: w.x, value: parseEuroAmount(m[1]) });
+      i++;
+    }
+  }
+  return out;
+}
+
+/**
+ * Décode un récapitulatif de déclaration en ligne.
+ *
+ * Le document est un tableau : les libellés de nature de chiffre d'affaires
+ * tiennent sur plusieurs lignes, les montants sont alignés en colonnes.
+ * La ligne « Montant totaux » sert de gabarit : elle donne l'abscisse de
+ * chaque colonne, ce qui permet ensuite de lire la bonne valeur pour chaque
+ * nature d'activité sans dépendre de l'ordre du texte.
+ */
+function parseUrssafPdf(items) {
+  const lines = itemsToLines(items);
+  const fullText = lines.map(l => l.text).join('\n');
+  const flat = deaccent(fullText.replace(/[\s\u00a0]+/g, ' '));
+
+  if (!/URSSAF|MICRO-SOCIAL|CHIFFRE D'AFFAIRES/.test(flat)) {
+    const sample = fullText.slice(0, 200).replace(/\s+/g, ' ');
+    throw new Error(`Ce PDF ne ressemble pas à un récapitulatif URSSAF. ${describeSource(items)} Texte lu : « ${sample} »`);
+  }
+
+  // Période : « Régime micro-social simplifié - août 2026 » ou un trimestre
+  let month = null, quarter = null, year = null;
+  const monthMatch = flat.match(new RegExp(`(${Object.keys(MONTHS_FR).join('|')})\\s+(\\d{4})`));
+  const quarterMatch = flat.match(/(\d)(?:ER|EME|E)?\s*TRIMESTRE\s+(\d{4})/);
+  if (monthMatch) {
+    month = MONTHS_FR[monthMatch[1]];
+    year = Number(monthMatch[2]);
+  } else if (quarterMatch) {
+    quarter = Number(quarterMatch[1]);
+    year = Number(quarterMatch[2]);
+    month = quarter * 3;
+  } else {
+    throw new Error("Période introuvable sur ce récapitulatif URSSAF.");
+  }
+
+  const siret = (flat.match(/SIRET\s*(\d[\d\s]{12,})/) || [])[1]?.replace(/\s/g, '') || '';
+  const vfl = /VERSEMENT LIBERATOIRE/.test(flat) && !/N'AVEZ PAS OPTE/.test(flat);
+
+  // Gabarit de colonnes, donné par la ligne de totaux
+  const totalsLine = lines.find(l => /Montant\s+totaux/i.test(l.text));
+  if (!totalsLine) throw new Error("Ligne « Montant totaux » introuvable sur ce récapitulatif.");
+  const totals = moneyTokens(totalsLine);
+  if (totals.length < 1) throw new Error("Aucun montant lisible sur la ligne de totaux.");
+
+  const caColumnX = totals[0].x;
+  const pick = (n) => totals[n]?.value ?? 0;
+
+  // Nature du chiffre d'affaires : chaque libellé ouvre un bloc jusqu'au suivant
+  const NATURES = [
+    { key: 'bnc',        test: /ACTIVITES LIBERALES/ },
+    { key: 'bicVente',   test: /VENTES DE MARCHANDISES/ },
+    { key: 'bicService', test: /PRESTATIONS DE SERVICES/ }
+  ];
+
+  const anchors = [];
+  lines.forEach((l, i) => {
+    const t = deaccent(l.text);
+    for (const n of NATURES) {
+      if (n.test.test(t) && !anchors.some(a => a.key === n.key)) {
+        anchors.push({ key: n.key, index: i });
+      }
+    }
+  });
+  anchors.sort((a, b) => a.index - b.index);
+
+  const amounts = { bnc: 0, bicVente: 0, bicService: 0 };
+  for (let a = 0; a < anchors.length; a++) {
+    const from = anchors[a].index;
+    const to = anchors[a + 1]?.index ?? Math.min(lines.length, from + 8);
+    let best = null;
+    for (let i = from; i < to; i++) {
+      for (const tok of moneyTokens(lines[i])) {
+        const d = Math.abs(tok.x - caColumnX);
+        if (d < 60 && (!best || d < best.d)) best = { d, value: tok.value };
+      }
+    }
+    if (best) amounts[anchors[a].key] = best.value;
+  }
+
+  const result = {
+    month: `${year}-${String(month).padStart(2, '0')}`,
+    year,
+    quarter,
+    siret,
+    vfl,
+    bnc: amounts.bnc,
+    bicVente: amounts.bicVente,
+    bicService: amounts.bicService,
+    totalCa: pick(0),
+    totalDue: pick(1),
+    cotisations: pick(2),
+    cfp: pick(3),
+    vflAmount: pick(4)
+  };
+
+  // Contrôles : la ventilation doit reconstituer le total, et les
+  // prélèvements doivent correspondre aux taux du régime.
+  const ventilated = result.bnc + result.bicVente + result.bicService;
+  const expectedDue = result.cotisations + result.cfp + result.vflAmount;
+
+  const rate = (ca, r) => ca > 0 ? r : 0;
+  const theoretical = ['bnc', 'bicVente', 'bicService'].reduce((acc, k) => {
+    const map = { bnc: 'bnc', bicVente: 'bic_vente', bicService: 'bic_service' };
+    const r = microRates()[map[k]];
+    const ca = result[k];
+    if (!r || !ca) return acc;
+    acc.cotisations += ca * rate(ca, r.cotisations);
+    acc.cfp += ca * rate(ca, r.cfp);
+    acc.vfl += result.vfl ? ca * rate(ca, r.vfl) : 0;
+    return acc;
+  }, { cotisations: 0, cfp: 0, vfl: 0 });
+
+  result.check = {
+    ventilated,
+    ventilationOk: Math.abs(ventilated - result.totalCa) <= 1,
+    dueOk: result.totalDue === 0 || Math.abs(expectedDue - result.totalDue) <= 1,
+    theoretical,
+    ratesOk: Math.abs(theoretical.cotisations - result.cotisations) <= 2
+             && Math.abs(theoretical.vfl - result.vflAmount) <= 2
+  };
+
+  if (result.totalCa === 0 && ventilated === 0) {
+    throw new Error("Aucun chiffre d'affaires détecté sur ce récapitulatif.");
+  }
+  return result;
+}
+
 
 const MONTHS_LONG = {
   JANUARY: 1, FEBRUARY: 2, MARCH: 3, APRIL: 4, MAY: 5, JUNE: 6,

@@ -151,6 +151,12 @@
             <h2>Chiffre d'affaires Air One Aero</h2>
             <button type="button" class="btn btn-ghost" id="add-revenue" style="padding:7px 12px;min-height:34px;font-size:.8rem">Ajouter une recette</button>
           </div>
+          <div class="btn-row" style="margin-bottom:12px">
+            <label class="btn btn-primary btn-block" for="urssaf-file" style="cursor:pointer">Importer une déclaration Urssaf</label>
+            <input type="file" id="urssaf-file" accept="application/pdf" multiple hidden>
+          </div>
+          <div id="urssaf-summary"></div>
+          <div class="log" id="urssaf-list"></div>
           <div id="revenue-totals"></div>
           <div class="log" id="revenue-list"></div>
         </div>

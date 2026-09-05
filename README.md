@@ -104,6 +104,24 @@ chacune : toutes sont lues, et un contrôle de distance empêche qu'un code de l
 Si un import échoue, le message d'erreur indique le nombre de pages, la rotation détectée, le
 nombre d'éléments de texte lus et le début du texte, ce qui suffit à identifier le problème.
 
+### Déclaration Urssaf
+
+**Revenus → Importer une déclaration Urssaf**, sélection multiple possible. L'app relève la
+période, le SIRET, l'option de versement libératoire, la ventilation du chiffre d'affaires par
+nature (BNC, BIC ventes, BIC prestations) et le détail des prélèvements.
+
+Trois contrôles sont menés avant l'enregistrement : la ventilation par nature doit reconstituer le
+chiffre d'affaires total, la somme des cotisations, de la CFP et du versement libératoire doit
+égaler le montant dû, et les prélèvements doivent correspondre aux taux du régime. Toute
+divergence est affichée en clair.
+
+Une déclaration Urssaf fait foi : dès qu'il en existe une pour l'année, c'est elle qui alimente le
+chiffre d'affaires du bilan. Les recettes saisies à la main servent alors de contrôle, et tout écart
+entre les deux est signalé.
+
+Si le versement libératoire est détecté, le réglage correspondant est activé automatiquement : il
+change les cases de report du chiffre d'affaires.
+
 ### Bulletin de paie
 
 **Revenus → Importer un bulletin PDF**. Plusieurs fichiers peuvent être sélectionnés d'un coup.
@@ -133,7 +151,8 @@ immédiatement. Les taux se modifient dans les réglages, une ligne par devise a
 **Remboursé par l'employeur.** Cocher la case exclut la ligne du total déductible tout en gardant la
 trace de la dépense.
 
-**Séjours.** Le plus simple est d'importer le roster. Sinon, chaque rotation se saisit avec ses dates. Le décompte des jours par
+**Séjours.** Le journal est découpé par mois, chacun refermé par son décompte de séjours, de nuits
+et d'indemnités. Le plus simple est d'importer le roster. Sinon, chaque rotation se saisit avec ses dates. Le décompte des jours par
 pays se construit tout seul, sans compter deux fois une journée passée dans deux pays.
 
 **Revenus.** Le module bulletin est calé sur le format Eurowings Europe Ltd. Cinq lignes à recopier :

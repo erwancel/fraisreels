@@ -459,6 +459,7 @@ async function buildBackup(onProgress) {
     trips:    await db.all('trips'),
     payslips: await db.all('payslips'),
     revenues: await db.all('revenues'),
+    urssaf:   await db.all('urssaf'),
     settings: await db.all('settings'),
     receipts: []
   };
@@ -485,7 +486,7 @@ async function restoreBackup(file, mode = 'replace') {
 
   if (mode === 'replace') await db.wipeAll();
 
-  for (const key of ['expenses', 'trips', 'payslips', 'revenues']) {
+  for (const key of ['expenses', 'trips', 'payslips', 'revenues', 'urssaf']) {
     for (const row of payload[key] || []) await db.put(key, row);
   }
   for (const r of payload.receipts || []) {

@@ -311,14 +311,31 @@ function renderTrips() {
     : `<div class="empty">Rien à décompter pour ${d.year}.</div>`;
 
   const trips = [...d.trips].sort((a, b) => b.start.localeCompare(a.start));
-  $('#trip-list').innerHTML = trips.length ? trips.map(t => {
+  const MONTH_NAMES = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+                       'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+
+  let currentMonth = null;
+  const rows = [];
+
+  for (const t of trips) {
+    const key = t.start.slice(0, 7);
+    if (key !== currentMonth) {
+      // Chaque mois est refermé par son propre décompte avant d'ouvrir le suivant
+      if (currentMonth) rows.push(monthFooter(d, currentMonth));
+      currentMonth = key;
+      rows.push(`<div class="log-month">
+        <span>${MONTH_NAMES[Number(key.slice(5)) - 1]} ${key.slice(0, 4)}</span>
+      </div>`);
+    }
+
     const { day, month } = dayMonth(t.start);
     const s = new Date(t.start + 'T12:00:00');
     const e = new Date((t.end || t.start) + 'T12:00:00');
     const days = Math.round((e - s) / 86400000) + 1;
     const nights = t.nights ?? Math.max(0, days - 1);
     const a = tripAllowance(t);
-    return `
+
+    rows.push(`
       <button type="button" class="log-row" data-trip="${t.id}">
         <span class="log-date"><b>${day}</b>${month}</span>
         <span class="log-main">
@@ -326,8 +343,24 @@ function renderTrips() {
           <span class="log-meta">${escapeHtml(PURPOSES[t.purpose] || '')}<span class="dot"></span>${t.start.split('-').reverse().slice(0, 2).join('/') } → ${(t.end || t.start).split('-').reverse().slice(0, 2).join('/')}${t.lodged ? '<span class="dot"></span>hôtel fourni' : ''}</span>
         </span>
         <span class="log-amount">${a.amount ? eur(a.amount) : days + ' j'}<small>${a.amount ? `${a.units} × ${eur0(a.rate)}` : `${nights} nuit${nights > 1 ? 's' : ''}`}</small></span>
-      </button>`;
-  }).join('') : `<div class="empty"><strong>Aucun séjour</strong>Ajoute tes rotations et découchés au fil de l'eau.</div>`;
+      </button>`);
+  }
+  if (currentMonth) rows.push(monthFooter(d, currentMonth));
+
+  $('#trip-list').innerHTML = rows.length
+    ? rows.join('')
+    : `<div class="empty"><strong>Aucun séjour</strong>Importe ton roster ou ajoute tes rotations à la main.</div>`;
+}
+
+/** Total d'un mois, affiché sous ses séjours. */
+function monthFooter(d, key) {
+  const inMonth = d.trips.filter(t => t.start.slice(0, 7) === key);
+  const nights = inMonth.reduce((s, t) => s + (t.nights ?? 0), 0);
+  const amount = inMonth.reduce((s, t) => s + tripAllowance(t).amount, 0);
+  return `<div class="log-total" style="margin-bottom:14px">
+    <span>${inMonth.length} séjour${inMonth.length > 1 ? 's' : ''}, ${nights} nuit${nights > 1 ? 's' : ''}</span>
+    ${amount ? `<span class="money">${eur(amount)}</span>` : ''}
+  </div>`;
 }
 
 /* ===========================================================
@@ -371,6 +404,33 @@ function renderIncome() {
       </button>`;
   }).join('') + `<div class="log-total"><span>${slips.length} bulletin${slips.length > 1 ? 's' : ''}</span><span class="money">${eur(d.taxableSalary)}</span></div>`
     : `<div class="empty"><strong>Aucun bulletin</strong>Recopie les lignes /106, /350, /360, 202F et /401 de chaque bulletin.</div>`;
+
+  // Déclarations Urssaf
+  const decls = [...d.declarations].sort((a, b) => (b.month || '').localeCompare(a.month || ''));
+  $('#urssaf-summary').innerHTML = decls.length ? `
+    <div class="stats" style="margin-bottom:12px">
+      <div class="stat"><span class="label">CA déclaré</span><span class="value">${eur0(d.turnover)}</span><div class="sub">${decls.length} déclaration${decls.length > 1 ? 's' : ''}</div></div>
+      <div class="stat"><span class="label">Prélèvements</span><span class="value">${eur0(d.cotisations + d.cfp + d.vflPaid)}</span><div class="sub">${num(d.turnover > 0 ? ((d.cotisations + d.cfp + d.vflPaid) / d.turnover) * 100 : 0, 1)} % du CA</div></div>
+      <div class="stat"><span class="label">Reste net</span><span class="value">${eur0(d.turnover - d.cotisations - d.cfp - d.vflPaid)}</span><div class="sub">après charges</div></div>
+    </div>
+    ${d.revenueGap ? `<div class="notice alert">
+      Écart de ${eur(Math.abs(d.revenueGap))} entre le chiffre d'affaires déclaré à l'Urssaf
+      (${eur(d.turnover)}) et le total des recettes saisies ici (${eur(d.invoicedTotal)}).
+      ${d.revenueGap > 0 ? 'Des recettes manquent dans l\'application.' : 'Des recettes saisies ne figurent pas dans les déclarations.'}
+    </div>` : ''}` : '';
+
+  $('#urssaf-list').innerHTML = decls.length ? decls.map(x => {
+    const rate = x.totalCa > 0 ? (x.totalDue / x.totalCa) * 100 : 0;
+    return `
+      <div class="log-row" style="cursor:default">
+        <span class="log-date"><b>${MONTH_LABELS[Number(x.month.slice(5, 7)) - 1]?.slice(0, 4) || '?'}</b>${x.month.slice(0, 4)}</span>
+        <span class="log-main">
+          <span class="log-label">${eur(x.totalCa)} déclarés</span>
+          <span class="log-meta">${eur(x.cotisations)} de cotisations<span class="dot"></span>${num(rate, 1)} % de prélèvement${x.vfl ? '<span class="dot"></span>libératoire' : ''}</span>
+        </span>
+        <span class="log-amount money gain">${eur(x.totalCa - x.totalDue)}<small>net</small></span>
+      </div>`;
+  }).join('') : '';
 
   // Chiffre d'affaires
   $('#revenue-totals').innerHTML = d.revenueRows.length
@@ -1188,12 +1248,6 @@ async function importPayslips(files, button) {
       }
     };
 
-    const monthName = (m) => {
-      const names = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin',
-                     'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
-      return `${names[Number(m.slice(5, 7)) - 1]} ${m.slice(0, 4)}`;
-    };
-
     $('#import-title').textContent = parsed.length > 1 ? 'Bulletins détectés' : 'Bulletin détecté';
     $('#import-body').innerHTML = parsed.map(p => {
       // Le taux du bulletin sert à afficher chaque ligne dans les deux monnaies
@@ -1204,7 +1258,7 @@ async function importPayslips(files, button) {
       return `
       <div class="panel" style="margin-bottom:12px">
         <div class="panel-head">
-          <h2 style="text-transform:capitalize">${monthName(p.month)}</h2>
+          <h2 style="text-transform:capitalize">${monthLabel(p.month)}</h2>
           <span class="hint">${p.currency}${byMonth[p.month] ? ' · remplace l\'existant' : ''}</span>
         </div>
         <table class="grid">
@@ -1242,6 +1296,132 @@ async function importPayslips(files, button) {
     button.textContent = label;
   }
 }
+
+async function importUrssaf(files, button) {
+  const label = button.textContent;
+  const parsed = [];
+  const errors = [];
+
+  try {
+    for (const file of files) {
+      button.textContent = `Lecture de ${file.name}…`;
+      try {
+        parsed.push(parseUrssafPdf(await pdfItems(file)));
+      } catch (err) {
+        errors.push(`${file.name} : ${err.message}`);
+      }
+    }
+    if (!parsed.length) {
+      toast(errors[0] || 'Aucune déclaration lisible.', 6000);
+      return;
+    }
+
+    const existing = await db.all('urssaf');
+    const byMonth = Object.fromEntries(existing.map(d => [d.month, d]));
+    const vflDetected = parsed.some(p => p.vfl);
+
+    pendingImport = {
+      kind: 'urssaf',
+      apply: async () => {
+        for (const p of parsed) {
+          await db.put('urssaf', {
+            id: byMonth[p.month]?.id || uid(),
+            month: p.month,
+            year: p.year,
+            quarter: p.quarter,
+            siret: p.siret,
+            vfl: p.vfl,
+            bnc: p.bnc,
+            bicVente: p.bicVente,
+            bicService: p.bicService,
+            totalCa: p.totalCa,
+            totalDue: p.totalDue,
+            cotisations: p.cotisations,
+            cfp: p.cfp,
+            vflAmount: p.vflAmount,
+            updatedAt: Date.now()
+          });
+        }
+        // L'option de versement libératoire conditionne les cases de report
+        if (vflDetected && !settings.vfl) await saveSetting('vfl', true);
+        return `${parsed.length} déclaration${parsed.length > 1 ? 's' : ''} enregistrée${parsed.length > 1 ? 's' : ''}.`;
+      }
+    };
+
+    const totals = parsed.reduce((a, p) => {
+      a.ca += p.totalCa; a.due += p.totalDue;
+      a.cot += p.cotisations; a.cfp += p.cfp; a.vfl += p.vflAmount;
+      return a;
+    }, { ca: 0, due: 0, cot: 0, cfp: 0, vfl: 0 });
+
+    $('#import-title').textContent = parsed.length > 1 ? 'Déclarations Urssaf' : 'Déclaration Urssaf';
+    $('#import-body').innerHTML = parsed.map(p => {
+      const anomalies = [];
+      if (!p.check.ventilationOk) {
+        anomalies.push(`La ventilation par nature donne ${eur(p.check.ventilated)} alors que le total déclaré est ${eur(p.totalCa)}.`);
+      }
+      if (!p.check.dueOk) {
+        anomalies.push(`Cotisations, CFP et versement libératoire font ${eur(p.cotisations + p.cfp + p.vflAmount)}, contre ${eur(p.totalDue)} annoncés.`);
+      }
+      if (!p.check.ratesOk) {
+        anomalies.push(`Les prélèvements s'écartent des taux du régime : attendus ${eur(p.check.theoretical.cotisations)} de cotisations et ${eur(p.check.theoretical.vfl)} de versement libératoire.`);
+      }
+
+      const natures = [
+        ['Activités libérales (BNC)', p.bnc],
+        ['Ventes de marchandises', p.bicVente],
+        ['Prestations de services (BIC)', p.bicService]
+      ].filter(([, v]) => v > 0);
+
+      return `
+      <div class="panel" style="margin-bottom:12px">
+        <div class="panel-head">
+          <h2 style="text-transform:capitalize">${monthLabel(p.month)}</h2>
+          <span class="hint">${p.vfl ? 'versement libératoire' : 'sans versement libératoire'}${byMonth[p.month] ? ' · remplace l\'existant' : ''}</span>
+        </div>
+        <table class="grid">
+          <tbody>
+            ${natures.map(([l, v]) => `<tr><td>${l}</td><td class="num">${eur(v)}</td></tr>`).join('')}
+            <tr><td style="color:var(--ink-3)">Cotisations</td><td class="num" style="color:var(--ink-3)">− ${eur(p.cotisations)}</td></tr>
+            <tr><td style="color:var(--ink-3)">Contribution formation</td><td class="num" style="color:var(--ink-3)">− ${eur(p.cfp)}</td></tr>
+            ${p.vflAmount ? `<tr><td style="color:var(--ink-3)">Versement libératoire</td><td class="num" style="color:var(--ink-3)">− ${eur(p.vflAmount)}</td></tr>` : ''}
+          </tbody>
+          <tfoot><tr><td>Reste après prélèvements</td><td class="num money gain">${eur(p.totalCa - p.totalDue)}</td></tr></tfoot>
+        </table>
+        <p class="verdict-note" style="margin-top:10px">
+          Taux global de prélèvement : <strong>${num(p.totalCa > 0 ? (p.totalDue / p.totalCa) * 100 : 0, 1)} %</strong>
+          sur ${eur(p.totalCa)} encaissés.
+        </p>
+        <p class="verdict-note" style="margin-top:4px;color:${anomalies.length ? 'var(--warn)' : 'var(--gain)'}">
+          ${anomalies.length ? anomalies.join('<br>') : 'Tous les recoupements sont corrects.'}
+        </p>
+      </div>`;
+    }).join('')
+      + (parsed.length > 1 ? `<div class="notice">
+          Cumul importé : ${eur(totals.ca)} de chiffre d'affaires, ${eur(totals.due)} de prélèvements,
+          soit ${eur(totals.ca - totals.due)} nets.
+        </div>` : '')
+      + (vflDetected && !settings.vfl ? `<div class="notice">
+          Le versement libératoire est activé sur ces déclarations. Le réglage correspondant sera coché,
+          ce qui change les cases de report de ton chiffre d'affaires.
+        </div>` : '')
+      + (errors.length ? `<div class="notice alert">${errors.map(escapeHtml).join('<br>')}</div>` : '');
+
+    $('#import-confirm').disabled = false;
+    $('#import-confirm').textContent = `Enregistrer ${parsed.length} déclaration${parsed.length > 1 ? 's' : ''}`;
+    openSheet('dlg-import');
+
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Lecture de la déclaration impossible.', 6000);
+  } finally {
+    button.textContent = label;
+  }
+}
+
+const MONTH_LABELS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+                      'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+const monthLabel = (m) => `${MONTH_LABELS[Number(m.slice(5, 7)) - 1]} ${m.slice(0, 4)}`;
 
 async function confirmImport() {
   if (!pendingImport) return;
@@ -1323,6 +1503,11 @@ function bindEvents() {
   $('#payslip-file').addEventListener('change', async (e) => {
     const files = [...e.target.files];
     if (files.length) await importPayslips(files, $('label[for="payslip-file"]'));
+    e.target.value = '';
+  });
+  $('#urssaf-file').addEventListener('change', async (e) => {
+    const files = [...e.target.files];
+    if (files.length) await importUrssaf(files, $('label[for="urssaf-file"]'));
     e.target.value = '';
   });
   $('#import-confirm').addEventListener('click', confirmImport);
