@@ -3,7 +3,7 @@
    Change CACHE_VERSION à chaque déploiement pour forcer la mise à jour.
    =========================================================== */
 
-const CACHE_VERSION = 'frais-reels-v23';
+const CACHE_VERSION = 'frais-reels-v24';
 
 // Coquille de l'application : mise en cache dès l'installation.
 const SHELL = [
@@ -17,7 +17,14 @@ const SHELL = [
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',
-  './icons/apple-touch-icon.png'
+  './icons/icon-maskable-512.png',
+  './icons/apple-touch-icon.png',
+  './icons/apple-touch-icon-152.png',
+  './icons/apple-touch-icon-120.png',
+  './icons/favicon.ico',
+  './icons/favicon-16.png',
+  './icons/favicon-32.png',
+  './icons/favicon-48.png'
 ];
 
 // Ressources externes : mises en cache aussi, pour que les exports PDF et ZIP
