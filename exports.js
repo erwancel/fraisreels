@@ -211,7 +211,21 @@ const tableBase = {
   }
 };
 
-async function buildPdf(data) {
+/** Convertit un justificatif en image exploitable par jsPDF. */
+async function receiptToImage(blob) {
+  const bitmap = await createImageBitmap(blob);
+  const canvas = document.createElement('canvas');
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  canvas.getContext('2d').drawImage(bitmap, 0, 0);
+  bitmap.close?.();
+  return {
+    dataUrl: canvas.toDataURL('image/jpeg', 0.82),
+    ratio: bitmap.height / bitmap.width
+  };
+}
+
+async function buildPdf(data, { receipts = true } = {}) {
   await ensurePdf();
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
@@ -405,6 +419,71 @@ async function buildPdf(data) {
     });
   }
 
+  // ---------- Justificatifs en annexe ----------
+  // Le numéro de pièce reprend la position dans le journal, afin que le
+  // renvoi de la colonne « Piece » tombe sur la bonne image.
+  if (receipts) {
+    const proofs = [];
+    journal.forEach((e, i) => {
+      for (const rid of e.receiptIds || []) {
+        proofs.push({ ref: `P${String(i + 1).padStart(3, '0')}`, expense: e, rid });
+      }
+    });
+
+    if (proofs.length) {
+      doc.addPage();
+      y = M;
+      heading('Justificatifs');
+
+      const colW = (W - 2 * M - 10) / 2;   // deux colonnes
+      const cellH = 118;
+      let col = 0;
+
+      for (const proof of proofs) {
+        const rec = await db.get('receipts', proof.rid);
+        if (!rec) continue;
+
+        if (col === 0 && y + cellH > H - 20) { doc.addPage(); y = M; }
+        const x = M + col * (colW + 10);
+
+        // Cartouche
+        doc.setFillColor(240, 242, 245).rect(x, y, colW, 9, 'F');
+        doc.setFont('helvetica', 'bold').setFontSize(8).setTextColor(30, 36, 44);
+        doc.text(proof.ref, x + 2.5, y + 6);
+        doc.setFont('helvetica', 'normal').setFontSize(7.4).setTextColor(90, 96, 104);
+        const label = pdfSafe(
+          `${proof.expense.date.split('-').reverse().join('/')}  ${proof.expense.label || CAT_BY_ID[proof.expense.category]?.label || ''}  ${eur(deductibleAmount(proof.expense))}`
+        );
+        doc.text(doc.splitTextToSize(label, colW - 16)[0], x + 13, y + 6);
+
+        const boxY = y + 9;
+        const boxH = cellH - 9;
+        doc.setDrawColor(214, 219, 226).setLineWidth(0.2).rect(x, boxY, colW, boxH);
+
+        if (rec.mime === 'application/pdf') {
+          doc.setFont('helvetica', 'italic').setFontSize(8).setTextColor(130, 136, 144);
+          doc.text('Document PDF, fourni separement', x + colW / 2, boxY + boxH / 2, { align: 'center' });
+        } else {
+          try {
+            const img = await receiptToImage(rec.blob);
+            // L'image est ajustée à la case sans jamais être déformée
+            let w = colW - 6;
+            let h = w * img.ratio;
+            if (h > boxH - 6) { h = boxH - 6; w = h / img.ratio; }
+            doc.addImage(img.dataUrl, 'JPEG', x + (colW - w) / 2, boxY + (boxH - h) / 2, w, h);
+          } catch {
+            doc.setFont('helvetica', 'italic').setFontSize(8).setTextColor(180, 90, 70);
+            doc.text('Image illisible', x + colW / 2, boxY + boxH / 2, { align: 'center' });
+          }
+        }
+
+        col = 1 - col;
+        if (col === 0) y += cellH + 6;
+      }
+      if (col === 1) y += cellH + 6;
+    }
+  }
+
   // ---------- Pieds de page ----------
   const pages = doc.internal.getNumberOfPages();
   for (let p = 1; p <= pages; p++) {
@@ -434,7 +513,8 @@ async function buildZip(data, onProgress) {
   const root = `frais-reels-${data.year}`;
 
   onProgress?.('Récapitulatif PDF…');
-  zip.file(`${root}/recapitulatif-${data.year}.pdf`, await buildPdf(data));
+  // Les justificatifs sont déjà déposés à côté dans l'archive
+  zip.file(`${root}/recapitulatif-${data.year}.pdf`, await buildPdf(data, { receipts: false }));
 
   onProgress?.('Tableaux CSV…');
   zip.file(`${root}/depenses-${data.year}.csv`, expensesCsv(data));

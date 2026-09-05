@@ -263,6 +263,12 @@ frais-reels-2026/
 Chaque justificatif porte un numéro de pièce qui correspond à la colonne « Pièce » du journal PDF.
 Le dossier se transmet tel quel à un comptable.
 
+Le PDF joint les justificatifs en annexe, deux par page, chacun sous son numéro de pièce avec la
+date, le libellé et le montant. Le document se suffit ainsi à lui-même, sans avoir à ouvrir
+l'archive. Les justificatifs déjà au format PDF ne peuvent pas être incorporés : ils sont signalés
+comme fournis séparément. La version du récapitulatif contenue dans le ZIP est allégée de cette
+annexe, les fichiers étant déposés à côté.
+
 Le PDF enchaîne les sections sans saut de page inutile et omet les tableaux vides. Tout le texte
 qui y entre passe par un nettoyage : les polices standard de jsPDF se limitent au jeu Latin-1,
 et le séparateur de milliers du format français est une espace insécable étroite qui n'en fait
