@@ -817,8 +817,21 @@ async function updateStorageUsage() {
 
 function openSheet(id) {
   const dlg = $('#' + id);
-  dlg.showModal();
+  try {
+    dlg.showModal();
+  } catch (err) {
+    // Un dialogue déjà ouvert lève une exception : on le referme d'abord
+    console.warn('Ouverture de la feuille :', err);
+    dlg.close();
+    dlg.showModal();
+  }
+  // Sans cela, la page continue de défiler derrière la feuille sur iOS
+  document.body.style.overflow = 'hidden';
   return dlg;
+}
+
+function releaseScroll() {
+  if (!document.querySelector('dialog[open]')) document.body.style.overflow = '';
 }
 
 function closeSheet(dlg) { dlg.close(); }
@@ -2056,6 +2069,9 @@ function bindEvents() {
   // La visionneuse s'ouvre par-dessus une feuille ouverte et ne doit rien effacer.
   ['#dlg-expense', '#dlg-trip', '#dlg-payslip', '#dlg-revenue', '#dlg-urssaf']
     .forEach(sel => $(sel).addEventListener('close', discardPendingReceipts));
+
+  // Le défilement de la page reprend dès qu'aucune feuille n'est ouverte
+  $$('dialog').forEach(d => d.addEventListener('close', releaseScroll));
 
   // Fermeture par appui sur le fond
   $$('dialog.sheet').forEach(d => d.addEventListener('click', (e) => {
