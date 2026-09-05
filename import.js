@@ -593,9 +593,16 @@ function parseUrssafPdf(items) {
              && Math.abs(theoretical.vfl - result.vflAmount) <= 2
   };
 
-  if (result.totalCa === 0 && ventilated === 0) {
-    throw new Error("Aucun chiffre d'affaires détecté sur ce récapitulatif.");
+  // Un mois sans activité produit un récapitulatif entièrement à zéro : c'est
+  // une déclaration valide, qui prouve le dépôt. On ne refuse le document que
+  // si rien de chiffré n'y a été trouvé, signe d'une lecture ratée.
+  if (!totalsLine && heads.length === 0) {
+    throw new Error(
+      "Aucun montant lisible sur ce récapitulatif. " + describeSource(items) +
+      " Saisis-le à la main depuis l'écran Revenus."
+    );
   }
+  result.nil = result.totalCa === 0 && result.totalDue === 0;
   return result;
 }
 

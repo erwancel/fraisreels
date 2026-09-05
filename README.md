@@ -129,6 +129,10 @@ en fragments, et « 1 159 € » serait lu 159 €.
 La ligne « Montant totaux » n'est pas indispensable : à défaut, les totaux se déduisent de la
 ventilation.
 
+Les **déclarations à zéro** sont acceptées. Un mois sans activité produit un récapitulatif
+entièrement à zéro, qui prouve le dépôt : il s'enregistre et s'affiche comme « Déclaration à
+zéro ». Le document n'est refusé que si aucun montant n'y a été trouvé, signe d'une lecture ratée.
+
 Trois contrôles sont menés avant l'enregistrement : la ventilation par nature doit reconstituer le
 chiffre d'affaires total, la somme des cotisations, de la CFP et du versement libératoire doit
 égaler le montant dû, et les prélèvements doivent correspondre aux taux du régime. Toute

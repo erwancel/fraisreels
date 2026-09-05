@@ -543,7 +543,7 @@ function renderIncome() {
   const decls = [...d.declarations].sort((a, b) => (b.month || '').localeCompare(a.month || ''));
   $('#urssaf-summary').innerHTML = decls.length ? `
     <div class="stats" style="margin-bottom:12px">
-      <div class="stat"><span class="label">CA déclaré</span><span class="value">${eur0(d.turnover)}</span><div class="sub">${decls.length} déclaration${decls.length > 1 ? 's' : ''}</div></div>
+      <div class="stat"><span class="label">CA déclaré</span><span class="value">${eur0(d.turnover)}</span><div class="sub">${decls.length} déclaration${decls.length > 1 ? 's' : ''}${decls.filter(x => !x.totalCa).length ? `, dont ${decls.filter(x => !x.totalCa).length} à zéro` : ''}</div></div>
       <div class="stat"><span class="label">Prélèvements</span><span class="value">${eur0(d.cotisations + d.cfp + d.vflPaid)}</span><div class="sub">${num(d.turnover > 0 ? ((d.cotisations + d.cfp + d.vflPaid) / d.turnover) * 100 : 0, 1)} % du CA</div></div>
       <div class="stat"><span class="label">Reste net</span><span class="value">${eur0(d.turnover - d.cotisations - d.cfp - d.vflPaid)}</span><div class="sub">après charges</div></div>
     </div>
@@ -556,15 +556,18 @@ function renderIncome() {
   $('#urssaf-list').classList.toggle('is-editing', state.editList === 'urssaf');
   $('#urssaf-list').innerHTML = decls.length ? decls.map(x => {
     const rate = x.totalCa > 0 ? (x.totalDue / x.totalCa) * 100 : 0;
+    const nil = (x.totalCa || 0) === 0;
     return `
       <div class="log-row" data-urssaf="${x.id}"${pickState('urssaf', x.id)} style="cursor:pointer">
         ${pickMark('urssaf')}
         <span class="log-date"><b>${MONTH_LABELS[Number(x.month.slice(5, 7)) - 1]?.slice(0, 4) || '?'}</b>${x.month.slice(0, 4)}</span>
         <span class="log-main">
-          <span class="log-label">${eur(x.totalCa)} déclarés</span>
-          <span class="log-meta">${eur(x.cotisations)} de cotisations<span class="dot"></span>${num(rate, 1)} % de prélèvement${x.vfl ? '<span class="dot"></span>libératoire' : ''}</span>
+          <span class="log-label"${nil ? ' style="color:var(--ink-3)"' : ''}>${nil ? 'Déclaration à zéro' : `${eur(x.totalCa)} déclarés`}</span>
+          <span class="log-meta">${nil
+            ? 'aucune activité sur la période'
+            : `${eur(x.cotisations)} de cotisations<span class="dot"></span>${num(rate, 1)} % de prélèvement${x.vfl ? '<span class="dot"></span>libératoire' : ''}`}</span>
         </span>
-        <span class="log-amount money gain">${eur(x.totalCa - x.totalDue)}<small>net</small></span>
+        <span class="log-amount${nil ? '' : ' money gain'}"${nil ? ' style="color:var(--ink-3)"' : ''}>${nil ? '—' : eur(x.totalCa - x.totalDue)}${nil ? '' : '<small>net</small>'}</span>
       </div>`;
   }).join('') : '';
 
@@ -770,13 +773,14 @@ function renderReport() {
 
   $('#report-detail').innerHTML = (d.categories.length || d.courrierDeduction)
     ? `<table class="grid">
+        <thead><tr><th>Poste</th><th class="num">Lignes</th><th class="num">Montant</th></tr></thead>
         <tbody>
-        ${d.courrierDeduction ? `<tr><td>Frais en courrier — ${d.courrier.nights} nuits d'escale</td><td class="num" style="color:var(--ink-3)">${d.courrier.counted}</td><td class="num">${eur(d.courrierDeduction)}</td></tr>` : ''}
+        ${d.courrierDeduction ? `<tr><td>Frais en courrier<br><small style="color:var(--ink-3)">${d.courrier.nights} nuits d'escale sur ${d.courrier.counted} séjours</small></td><td class="num" style="color:var(--ink-3)">${d.courrier.counted}</td><td class="num">${eur(d.courrierDeduction)}</td></tr>` : ''}
         ${d.categories.map(c => {
           const n = d.expenses.filter(e => e.category === c.id && e.attach !== 'aoa' && !e.reimbursed).length;
           return `<tr><td>${escapeHtml(c.label)}</td><td class="num" style="color:var(--ink-3)">${n}</td><td class="num">${eur(c.total)}</td></tr>`;
         }).join('')}</tbody>
-        <tfoot><tr><td>Total</td><td></td><td class="num">${eur(d.deductible)}</td></tr></tfoot>
+        <tfoot><tr><td>Total</td><td class="num" style="color:var(--ink-3)">${d.courrier.counted + d.categories.reduce((n, c) => n + d.expenses.filter(e => e.category === c.id && e.attach !== 'aoa' && !e.reimbursed).length, 0)}</td><td class="num">${eur(d.deductible)}</td></tr></tfoot>
       </table>
       ${d.missingProof ? `<div class="notice alert" style="margin-top:12px">${d.missingProof} dépense${d.missingProof > 1 ? 's' : ''} sans justificatif. En cas de contrôle, chaque ligne doit pouvoir être prouvée.</div>` : ''}`
     : `<div class="empty">Rien à détailler pour ${d.year}.</div>`;
@@ -1206,7 +1210,11 @@ function updateUrssafPreview() {
   const due = parseAmount($('#us-cotis').value) + parseAmount($('#us-cfp').value) + parseAmount($('#us-vfl').value);
 
   const box = $('#us-check');
-  if (ca <= 0) { box.textContent = 'Renseigne au moins une nature de chiffre d\'affaires.'; return; }
+  if (ca <= 0 && due <= 0) {
+    box.innerHTML = 'Déclaration à zéro : aucun chiffre d\'affaires sur la période. ' +
+                    'Elle sera enregistrée telle quelle, pour garder la trace du dépôt.';
+    return;
+  }
 
   const net = ca - due;
   box.innerHTML = `Chiffre d'affaires : <strong>${eur(ca)}</strong><br>
@@ -1222,7 +1230,6 @@ async function saveUrssaf() {
   const bicService = parseAmount($('#us-bic-service').value);
   const bicVente = parseAmount($('#us-bic-vente').value);
   const totalCa = bnc + bicService + bicVente;
-  if (totalCa <= 0) { toast('Indique un chiffre d\'affaires.'); return false; }
 
   const cotisations = parseAmount($('#us-cotis').value);
   const cfp = parseAmount($('#us-cfp').value);
@@ -1740,14 +1747,18 @@ async function importUrssaf(files, button) {
         ['Ventes de marchandises', p.bicVente],
         ['Prestations de services (BIC)', p.bicService]
       ].filter(([, v]) => v > 0);
+      const nil = p.nil;
 
       return `
       <div class="panel" style="margin-bottom:12px">
         <div class="panel-head">
           <h2 style="text-transform:capitalize">${monthLabel(p.month)}</h2>
-          <span class="hint">${p.vfl ? 'versement libératoire' : 'sans versement libératoire'}${byMonth[p.month] ? ' · remplace l\'existant' : ''}</span>
+          <span class="hint">${nil ? 'néant' : (p.vfl ? 'versement libératoire' : 'sans versement libératoire')}${byMonth[p.month] ? ' · remplace l\'existant' : ''}</span>
         </div>
-        <table class="grid">
+        ${nil ? `<p class="verdict-note" style="margin:0">
+          Aucun chiffre d'affaires sur cette période. La déclaration est enregistrée pour garder
+          la trace du dépôt.
+        </p>` : `<table class="grid">
           <tbody>
             ${natures.map(([l, v]) => `<tr><td>${l}</td><td class="num">${eur(v)}</td></tr>`).join('')}
             <tr><td style="color:var(--ink-3)">Cotisations</td><td class="num" style="color:var(--ink-3)">− ${eur(p.cotisations)}</td></tr>
@@ -1759,10 +1770,10 @@ async function importUrssaf(files, button) {
         <p class="verdict-note" style="margin-top:10px">
           Taux global de prélèvement : <strong>${num(p.totalCa > 0 ? (p.totalDue / p.totalCa) * 100 : 0, 1)} %</strong>
           sur ${eur(p.totalCa)} encaissés.
-        </p>
-        <p class="verdict-note" style="margin-top:4px;color:${anomalies.length ? 'var(--warn)' : 'var(--gain)'}">
+        </p>`}
+        ${nil ? '' : `<p class="verdict-note" style="margin-top:4px;color:${anomalies.length ? 'var(--warn)' : 'var(--gain)'}">
           ${anomalies.length ? anomalies.join('<br>') : 'Tous les recoupements sont corrects.'}
-        </p>
+        </p>`}
       </div>`;
     }).join('')
       + (parsed.length > 1 ? `<div class="notice">
