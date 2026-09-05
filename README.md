@@ -174,6 +174,10 @@ immédiatement. Les taux se modifient dans les réglages, une ligne par devise a
 **Remboursé par l'employeur.** Cocher la case exclut la ligne du total déductible tout en gardant la
 trace de la dépense.
 
+**Nuits hors domicile.** Les nuits passées chez soi ne sont pas comptées : une nuit à son domicile
+n'est pas une nuitée au sens des frais professionnels. La ligne France du tableau par pays porte
+donc des jours mais aucune nuit, et affiche un tiret plutôt qu'un zéro.
+
 **Compteurs de jours.** Trois nombres coexistent et désignent des choses différentes : les
 *jours couverts* sont toutes les journées enregistrées, domicile compris ; les *jours en
 déplacement* en retranchent le domicile ; les *nuits indemnisées* ne retiennent que les escales

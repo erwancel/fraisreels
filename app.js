@@ -229,7 +229,7 @@ function renderBoard() {
 
   const stats = [
     { label: 'Jours en déplacement', value: d.countries.awayDays,
-      sub: `${d.countries.totalNights} nuitées${d.courrierOn && d.courrier.nights !== d.countries.totalNights ? `, dont ${d.courrier.nights} indemnisées` : ''}` },
+      sub: `${d.countries.totalNights} nuits${d.courrierOn && d.courrier.nights !== d.countries.totalNights ? `, dont ${d.courrier.nights} indemnisées` : ''}` },
     { label: 'Jours au domicile', value: d.countries.homeDays, sub: `${d.countries.totalDays} jours couverts` },
     { label: 'Dépenses saisies', value: d.expenses.length, sub: d.missingProof ? `${d.missingProof} sans pièce` : 'toutes justifiées' },
     { label: 'Salaire déclaré', value: eur0(d.declaredSalary), sub: `${d.payslips.length} bulletins` },
@@ -286,14 +286,15 @@ function renderBoard() {
   const rows = d.countries.rows;
   $('#board-countries').innerHTML = rows.length
     ? `<table class="grid">
-        <thead><tr><th>Pays</th><th class="num">Jours</th><th class="num">Nuitées</th></tr></thead>
+        <thead><tr><th>Pays</th><th class="num">Jours</th><th class="num">Nuits hors domicile</th></tr></thead>
         <tbody>${rows.map(c => `
-          <tr><td>${escapeHtml(c.name)}</td><td class="num">${c.days}</td><td class="num">${c.nights}</td></tr>`).join('')}
+          <tr><td>${escapeHtml(c.name)}</td><td class="num">${c.days}</td><td class="num"${c.nights ? '' : ' style="color:var(--ink-3)"'}>${c.nights || '—'}</td></tr>`).join('')}
         </tbody>
         <tfoot><tr><td>Total</td><td class="num">${d.countries.totalDays}</td><td class="num">${d.countries.totalNights}</td></tr></tfoot>
       </table>
       ${d.countries.homeDays ? `<p class="verdict-note" style="margin-top:10px">
-        Dont ${d.countries.homeDays} jours au domicile en France, sans nuitée d'escale.
+        Les ${d.countries.homeDays} jours au domicile en France ne comptent aucune nuit :
+        une nuit chez soi n'est pas une nuitée au sens des frais professionnels.
       </p>` : ''}`
     : `<div class="empty"><strong>Aucun séjour enregistré</strong>Le décompte par pays se construit depuis l'onglet Séjours.</div>`;
 
@@ -425,16 +426,16 @@ function renderTrips() {
 
   $('#trip-summary').innerHTML = c.rows.length
     ? `<table class="grid">
-        <thead><tr><th>Pays</th><th class="num">Jours</th><th class="num">Nuitées</th>${d.courrierOn ? '<th class="num">Forfait</th>' : ''}</tr></thead>
+        <thead><tr><th>Pays</th><th class="num">Jours</th><th class="num">Nuits hors domicile</th>${d.courrierOn ? '<th class="num">Forfait</th>' : ''}</tr></thead>
         <tbody>${c.rows.map(r => {
           const cr = d.courrier.rows.find(x => x.code === r.code);
-          return `<tr><td>${escapeHtml(r.name)}</td><td class="num">${r.days}</td><td class="num">${r.nights}</td>${d.courrierOn ? `<td class="num">${cr ? eur(cr.total) : '—'}</td>` : ''}</tr>`;
+          return `<tr><td>${escapeHtml(r.name)}</td><td class="num">${r.days}</td><td class="num"${r.nights ? '' : ' style="color:var(--ink-3)"'}>${r.nights || '—'}</td>${d.courrierOn ? `<td class="num"${cr ? '' : ' style="color:var(--ink-3)"'}>${cr ? eur(cr.total) : '—'}</td>` : ''}</tr>`;
         }).join('')}
         </tbody>
         <tfoot><tr><td>Total</td><td class="num">${c.totalDays}</td><td class="num">${c.totalNights}</td>${d.courrierOn ? `<td class="num">${eur(d.courrier.gross)}</td>` : ''}</tr></tfoot>
       </table>
       <p class="verdict-note" style="margin-top:10px">
-        ${c.awayDays} jours en déplacement pour ${c.totalNights} nuitées${c.homeDays ? `, et ${c.homeDays} jours au domicile` : ''}.
+        ${c.awayDays} jours en déplacement pour ${c.totalNights} nuits hors domicile${c.homeDays ? `, et ${c.homeDays} jours au domicile` : ''}.${d.courrierOn && d.courrier.nights !== c.totalNights ? ` Sur ces nuits, ${d.courrier.nights} ouvrent droit au forfait ; les autres relèvent de la présence en base ou de missions.` : ''}
       </p>
       ${d.courrierOn ? `<p class="verdict-note" style="margin-top:10px">
         Forfait d'escale sur ${d.courrier.nights} nuits. Per diem déjà reçu de ton employeur :
@@ -732,7 +733,7 @@ function reportDetailText() {
     lines.join('\n') +
     `\n\nTotal : ${eur(d.deductible)}` +
     (d.countries.rows.length
-      ? `\n\nPrésence hors domicile : ${d.countries.totalDays} jours, ${d.countries.totalNights} nuitées\n` +
+      ? `\n\nPrésence : ${d.countries.awayDays} jours en déplacement, ${d.countries.totalNights} nuits hors domicile, ${d.countries.homeDays} jours au domicile\n` +
         d.countries.rows.map(c => `${c.name} : ${c.days} j / ${c.nights} nuits`).join('\n')
       : '');
 }

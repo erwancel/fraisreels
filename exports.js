@@ -109,7 +109,7 @@ function expensesCsv(data) {
 }
 
 function tripsCsv(data) {
-  const rows = [['Départ', 'Retour', 'Pays', 'Motif', 'Jours', 'Nuitées', 'Note']];
+  const rows = [['Départ', 'Retour', 'Pays', 'Escale', 'Motif', 'Jours', 'Nuits', 'Note']];
   const sorted = [...data.trips].sort((a, b) => a.start.localeCompare(b.start));
 
   for (const t of sorted) {
@@ -119,6 +119,7 @@ function tripsCsv(data) {
     rows.push([
       t.start, t.end || t.start,
       COUNTRY_BY_CODE[t.country] || t.country,
+      t.place || '',
       PURPOSES[t.purpose] || t.purpose || '',
       days, t.nights ?? Math.max(0, days - 1),
       t.notes || ''
@@ -127,7 +128,7 @@ function tripsCsv(data) {
 
   rows.push([]);
   rows.push(['Décompte par pays']);
-  rows.push(['Pays', 'Jours de présence', 'Nuitées']);
+  rows.push(['Pays', 'Jours de présence', 'Nuits hors domicile']);
   for (const c of data.countries.rows) rows.push([c.name, c.days, c.nights]);
   rows.push(['Total', data.countries.totalDays, data.countries.totalNights]);
   rows.push(['dont jours en déplacement', data.countries.awayDays]);
@@ -285,8 +286,8 @@ async function buildPdf(data) {
       styles: { fontSize: 9, cellPadding: 2.2 },
       columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' } },
       head: data.courrierOn
-        ? [['Pays', 'Jours de présence', 'Nuitées', 'Forfait escale']]
-        : [['Pays', 'Jours de présence', 'Nuitées']],
+        ? [['Pays', 'Jours de présence', 'Nuits hors domicile', 'Forfait escale']]
+        : [['Pays', 'Jours de présence', 'Nuits hors domicile']],
       body: data.countries.rows.map(c => {
         const row = [c.name, String(c.days), String(c.nights)];
         if (data.courrierOn) {
