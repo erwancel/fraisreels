@@ -123,14 +123,18 @@ const MONTH_KEYS = (year) =>
   Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`);
 
 /**
- * Repère les mois non documentés d'une année.
+ * Repère les mois sans bulletin ni déclaration Urssaf.
  *
  * Le contrôle ne porte que sur l'intervalle réellement concerné : du premier
  * mois pour lequel une pièce existe jusqu'au dernier mois échu. Sans cette
  * borne, une activité démarrée en juin ferait apparaître cinq mois manquants
  * qui n'ont jamais eu lieu d'exister.
+ *
+ * Les plannings sont volontairement hors de ce contrôle : ce sont des pièces
+ * d'appui, et leur absence dans le magasin ne prouve rien — les séjours
+ * peuvent avoir été saisis à la main ou importés avant son existence.
  */
-function coverageGaps(year, payslips, declarations, documents) {
+function coverageGaps(year, payslips, declarations) {
   const today = new Date();
   const lastMonth = year < today.getFullYear()
     ? 12
@@ -138,11 +142,10 @@ function coverageGaps(year, payslips, declarations, documents) {
 
   const has = {
     payslips:     new Set(payslips.map(p => p.month).filter(Boolean)),
-    declarations: new Set(declarations.map(d => d.month).filter(Boolean)),
-    rosters:      new Set(documents.filter(d => d.kind === 'roster').map(d => d.period).filter(Boolean))
+    declarations: new Set(declarations.map(d => d.month).filter(Boolean))
   };
 
-  const known = [...has.payslips, ...has.declarations, ...has.rosters].sort();
+  const known = [...has.payslips, ...has.declarations].sort();
   if (!known.length || lastMonth === 0) return { start: null, gaps: {}, total: 0 };
 
   const firstMonth = Number(known[0].slice(5, 7));
@@ -153,8 +156,7 @@ function coverageGaps(year, payslips, declarations, documents) {
 
   const gaps = {
     payslips:     range.filter(m => !has.payslips.has(m)),
-    declarations: range.filter(m => !has.declarations.has(m)),
-    rosters:      range.filter(m => !has.rosters.has(m))
+    declarations: range.filter(m => !has.declarations.has(m))
   };
 
   return {
@@ -162,7 +164,7 @@ function coverageGaps(year, payslips, declarations, documents) {
     end: range.at(-1),
     range,
     gaps,
-    total: gaps.payslips.length + gaps.declarations.length + gaps.rosters.length
+    total: gaps.payslips.length + gaps.declarations.length
   };
 }
 
@@ -900,7 +902,7 @@ async function computeYear(year) {
     fromUrssaf, cotisations, cfp, vflPaid, invoicedTotal, revenueGap
   };
 
-  result.coverage = coverageGaps(year, payslips, declarations, documents);
+  result.coverage = coverageGaps(year, payslips, declarations);
   result.closure = yearClosure(year);
   result.tax = estimateTax(result);
   return result;

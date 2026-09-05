@@ -320,8 +320,7 @@ function renderCoverage() {
 
   const lignes = [
     ligne('Bulletins de paie', c.gaps.payslips),
-    ligne('Déclarations Urssaf', c.gaps.declarations),
-    ligne('Plannings', c.gaps.rosters)
+    ligne('Déclarations Urssaf', c.gaps.declarations)
   ].filter(Boolean).join('');
 
   return `<div class="notice alert">

@@ -225,10 +225,14 @@ Les recettes Air One Aero se ventilent par catégorie fiscale.
 
 ## Suivi de la couverture
 
-L'accueil signale les mois échus pour lesquels une pièce manque : bulletin, déclaration Urssaf ou
-planning. Le contrôle ne porte que sur l'intervalle réellement concerné, du premier mois documenté
-au dernier mois échu — une activité démarrée en juin ne fait pas apparaître cinq mois manquants
-qui n'ont jamais eu lieu d'exister.
+L'accueil signale les mois échus sans bulletin de paie ni déclaration Urssaf. Le contrôle ne porte
+que sur l'intervalle réellement concerné, du premier mois documenté au dernier mois échu — une
+activité démarrée en juin ne fait pas apparaître cinq mois manquants qui n'ont jamais eu lieu
+d'exister.
+
+Les plannings restent hors de ce contrôle. Ce sont des pièces d'appui, et leur absence du magasin
+ne prouve rien : les séjours ont pu être saisis à la main, ou importés avant que ce magasin
+n'existe.
 
 Les PDF importés sont conservés comme justificatifs : le bulletin est attaché à son mois, la
 déclaration à la sienne, et le planning archivé sous sa période. Ce sont ces pièces qu'un contrôle
