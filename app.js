@@ -1644,6 +1644,59 @@ function openSettings() {
 
   openSheet('dlg-settings');
   updateSettingsStorage();
+  showVersion();
+}
+
+/** Version réellement servie, relevée auprès du service worker. */
+async function showVersion() {
+  const el = $('#st-version');
+  if (!el) return;
+
+  const dbInfo = `base de données v${DB_VERSION}`;
+  if (!navigator.serviceWorker?.controller) {
+    el.textContent = `Application non installée hors ligne, ${dbInfo}.`;
+    return;
+  }
+
+  el.textContent = `Lecture en cours, ${dbInfo}…`;
+  const reponse = new Promise(resolve => {
+    const handler = (e) => {
+      if (e.data?.type === 'version') {
+        navigator.serviceWorker.removeEventListener('message', handler);
+        resolve(e.data.value);
+      }
+    };
+    navigator.serviceWorker.addEventListener('message', handler);
+    setTimeout(() => resolve(null), 1500);
+  });
+
+  navigator.serviceWorker.controller.postMessage('version');
+  const version = await reponse;
+  el.textContent = version
+    ? `${version}, ${dbInfo}.`
+    : `Version indéterminée, ${dbInfo}.`;
+}
+
+async function checkUpdate() {
+  const btn = $('#st-update');
+  btn.disabled = true;
+  btn.textContent = 'Recherche…';
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration();
+    if (!reg) { toast('Aucun service worker enregistré.'); return; }
+    await reg.update();
+    if (reg.installing || reg.waiting) {
+      toast('Nouvelle version trouvée. Ferme puis rouvre l\'application.', 5000);
+    } else {
+      toast('Tu es déjà à jour.');
+    }
+  } catch (err) {
+    toast('Vérification impossible : ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Chercher une mise à jour';
+    showVersion();
+  }
 }
 
 async function updateSettingsStorage() {
@@ -2468,6 +2521,8 @@ function bindEvents() {
   });
 
   // Persistance et effacement
+  $('#st-update').addEventListener('click', checkUpdate);
+
   $('#st-persist').addEventListener('click', async () => {
     const granted = await navigator.storage?.persist?.();
     toast(granted ? 'Données protégées.' : 'Le navigateur a refusé la demande.');

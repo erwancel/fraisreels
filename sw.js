@@ -3,7 +3,7 @@
    Change CACHE_VERSION à chaque déploiement pour forcer la mise à jour.
    =========================================================== */
 
-const CACHE_VERSION = 'frais-reels-v26';
+const CACHE_VERSION = 'frais-reels-v27';
 
 // Coquille de l'application : mise en cache dès l'installation.
 const SHELL = [
@@ -55,6 +55,16 @@ self.addEventListener('activate', (event) => {
     await Promise.all(keys.filter(k => k !== CACHE_VERSION).map(k => caches.delete(k)));
     await self.clients.claim();
   })());
+});
+
+// L'application peut interroger la version réellement servie
+self.addEventListener('message', (event) => {
+  if (event.data === 'version') {
+    event.source?.postMessage({ type: 'version', value: CACHE_VERSION });
+  }
+  if (event.data === 'update') {
+    self.registration.update();
+  }
 });
 
 self.addEventListener('fetch', (event) => {
