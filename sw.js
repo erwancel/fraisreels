@@ -3,7 +3,7 @@
    Change CACHE_VERSION à chaque déploiement pour forcer la mise à jour.
    =========================================================== */
 
-const CACHE_VERSION = 'frais-reels-v14';
+const CACHE_VERSION = 'frais-reels-v15';
 
 // Coquille de l'application : mise en cache dès l'installation.
 const SHELL = [

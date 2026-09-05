@@ -174,7 +174,10 @@ const AIRPORT_COUNTRY = {
   HRG: 'EG', SSH: 'EG', CAI: 'EG', HBE: 'EG',
   TLV: 'IL', AMM: 'JO', AQJ: 'JO', DXB: 'AE', AUH: 'AE',
   RMF: 'EG', SID: 'CV', RAI: 'CV', BJZ: 'ES',
-  EVN: 'AM', TBS: 'GE', KUT: 'GE'
+  EVN: 'AM', TBS: 'GE', KUT: 'GE',
+  // Codes internes de la compagnie, absents de la nomenclature IATA
+  VLB: 'DE',   // Essen
+  ESS: 'DE'
 };
 
 const airportCountry = (code) => AIRPORT_COUNTRY[code] || null;
@@ -292,8 +295,15 @@ function parseRoster(items) {
 
   const unknownPlaces = [...new Set([...nights.values()].filter(p => !airportCountry(p)))];
 
+  const pad = (n) => String(n).padStart(2, '0');
+  const lastDay = new Date(endYear, endMonth, 0).getDate();
+  const coverage = {
+    from: `${startYear}-${pad(startMonth)}-${pad(firstDay)}`,
+    to: `${endYear}-${pad(endMonth)}-${pad(Math.min(lastDay, Number(period[4]) || lastDay))}`
+  };
+
   return {
-    startMonth, startYear, endMonth, endYear,
+    startMonth, startYear, endMonth, endYear, period: coverage,
     nights: [...nights.entries()].map(([date, place]) => ({ date, place })).sort((a, b) => a.date.localeCompare(b.date)),
     orphans: orphans.length,
     unknownPlaces,
@@ -302,43 +312,62 @@ function parseRoster(items) {
 }
 
 /**
- * Regroupe les nuits consécutives au même endroit en un seul séjour.
- * Un séjour par nuit gonflerait artificiellement le forfait d'escale,
- * qui accorde une demi-indemnité de retour par séjour.
+ * Reconstitue les séjours à partir des nuits, sur toute la période du planning.
+ *
+ * Deux règles corrigent le décompte :
+ * un séjour couvre exactement les jours de ses nuits, sans déborder sur le
+ * lendemain — sinon le jour du retour serait compté deux fois, dans le pays
+ * quitté et dans celui rejoint ; et les journées sans hébergement sont
+ * rattachées au domicile, ce qui rend visibles les périodes de repos.
  */
-function nightsToTrips(nights, baseAirports = []) {
+function nightsToTrips(nights, baseAirports = [], period = null) {
   const bases = new Set(baseAirports.map(s => s.toUpperCase()));
-  const trips = [];
+  const byDate = new Map(nights.map(n => [n.date, n.place]));
+
+  // Toutes les journées de la période, hébergées ou non
+  const days = [];
+  if (period?.from && period?.to) {
+    for (let d = new Date(period.from + 'T12:00:00');
+         d <= new Date(period.to + 'T12:00:00');
+         d.setDate(d.getDate() + 1)) {
+      const iso = d.toISOString().slice(0, 10);
+      days.push({ date: iso, place: byDate.get(iso) || null });
+    }
+  } else {
+    for (const n of nights) days.push({ date: n.date, place: n.place });
+  }
+
+  // Regroupement des journées consécutives au même endroit
+  const groups = [];
   let cur = null;
-
-  const flush = () => { if (cur) trips.push(cur); cur = null; };
-
-  for (const n of nights) {
-    const prev = cur && new Date(cur.lastDate + 'T12:00:00');
-    const here = new Date(n.date + 'T12:00:00');
-    const consecutive = prev && Math.round((here - prev) / 86400000) === 1;
-
-    if (cur && cur.place === n.place && consecutive) {
-      cur.lastDate = n.date;
-      cur.nights++;
-    } else {
-      flush();
-      cur = { place: n.place, start: n.date, lastDate: n.date, nights: 1 };
+  for (const day of days) {
+    if (cur && cur.place === day.place) { cur.end = day.date; cur.count++; }
+    else {
+      if (cur) groups.push(cur);
+      cur = { place: day.place, start: day.date, end: day.date, count: 1 };
     }
   }
-  flush();
+  if (cur) groups.push(cur);
 
-  return trips.map(t => {
-    // Le retour a lieu le lendemain de la dernière nuit
-    const end = new Date(t.lastDate + 'T12:00:00');
-    end.setDate(end.getDate() + 1);
+  return groups.map((g, i) => {
+    const home = g.place === null;
+    // La demi-indemnité de retour ne se justifie qu'au terme d'une rotation,
+    // c'est-à-dire lorsque le séjour est suivi d'un retour au domicile.
+    // Uniquement lorsqu'un retour au domicile suit effectivement. Pour le
+    // dernier séjour de la période, on ignore ce qui vient après : on
+    // n'accorde rien plutôt que de supposer, la case reste cochable à la main.
+    const next = groups[i + 1];
+    const endsAtBase = !home && !!next && next.place === null;
+
     return {
-      start: t.start,
-      end: end.toISOString().slice(0, 10),
-      country: airportCountry(t.place) || 'ZZ',
-      place: t.place,
-      nights: t.nights,
-      purpose: bases.has(t.place) ? 'base' : 'rotation'
+      start: g.start,
+      end: g.end,
+      country: home ? 'FR' : (airportCountry(g.place) || 'ZZ'),
+      place: g.place || '',
+      nights: home ? 0 : g.count,
+      days: g.count,
+      purpose: home ? 'domicile' : (bases.has(g.place) ? 'base' : 'rotation'),
+      endsAtBase
     };
   });
 }

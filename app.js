@@ -468,10 +468,12 @@ function renderTrips() {
         ${pickMark('trips')}
         <span class="log-date"><b>${day}</b>${month}</span>
         <span class="log-main">
-          <span class="log-label">${escapeHtml(COUNTRY_BY_CODE[t.country] || t.country)}</span>
+          <span class="log-label">${t.place ? `<span class="flag" style="color:var(--brass)">${escapeHtml(t.place)}</span> ` : ''}${escapeHtml(COUNTRY_BY_CODE[t.country] || t.country)}</span>
           <span class="log-meta">${escapeHtml(PURPOSES[t.purpose] || '')}<span class="dot"></span>${t.start.split('-').reverse().slice(0, 2).join('/') } → ${(t.end || t.start).split('-').reverse().slice(0, 2).join('/')}${t.lodged ? '<span class="dot"></span>hôtel fourni' : ''}</span>
         </span>
-        <span class="log-amount">${a.amount ? eur(a.amount) : days + ' j'}<small>${a.amount ? `${a.units} × ${eur0(a.rate)}` : `${nights} nuit${nights > 1 ? 's' : ''}`}</small></span>
+        <span class="log-amount">${a.amount ? eur(a.amount) : days + ' j'}<small>${a.amount
+          ? `${num(a.units, 1).replace(',0', '')} × ${eur0(a.rate)}`
+          : (t.purpose === 'domicile' ? 'au domicile' : `${nights} nuit${nights > 1 ? 's' : ''}`)}</small></span>
       </button>`);
   }
   if (currentMonth) rows.push(monthFooter(d, currentMonth));
@@ -555,7 +557,7 @@ function renderIncome() {
   $('#urssaf-list').innerHTML = decls.length ? decls.map(x => {
     const rate = x.totalCa > 0 ? (x.totalDue / x.totalCa) * 100 : 0;
     return `
-      <div class="log-row" data-urssaf="${x.id}"${pickState('urssaf', x.id)} style="cursor:${state.editList === 'urssaf' ? 'pointer' : 'default'}">
+      <div class="log-row" data-urssaf="${x.id}"${pickState('urssaf', x.id)} style="cursor:pointer">
         ${pickMark('urssaf')}
         <span class="log-date"><b>${MONTH_LABELS[Number(x.month.slice(5, 7)) - 1]?.slice(0, 4) || '?'}</b>${x.month.slice(0, 4)}</span>
         <span class="log-main">
@@ -940,6 +942,8 @@ function openTrip(trip) {
   $('#tr-end').value     = trip?.end || todayISO();
   $('#tr-country').value = trip?.country || 'DE';
   $('#tr-purpose').value = trip?.purpose || 'rotation';
+  $('#tr-place').value   = trip?.place || '';
+  $('#tr-base-return').checked = trip ? trip.endsAtBase !== false : true;
   $('#tr-lodged').checked = trip ? !!trip.lodged : true;
   $('#tr-notes').value   = trip?.notes || '';
   $('#tr-nights').value  = trip?.nights ?? autoNights();
@@ -966,6 +970,8 @@ async function saveTrip() {
     year: yearOf(start),
     country: $('#tr-country').value,
     purpose: $('#tr-purpose').value,
+    place: $('#tr-place').value.trim().toUpperCase(),
+    endsAtBase: $('#tr-base-return').checked,
     lodged: $('#tr-lodged').checked,
     nights: Number($('#tr-nights').value) || 0,
     notes: $('#tr-notes').value.trim(),
@@ -1162,6 +1168,76 @@ async function saveRevenue() {
     client: $('#rv-client').value.trim(),
     invoice: $('#rv-invoice').value.trim(),
     receiptIds: state.sheetReceipts.map(r => r.id),
+    updatedAt: Date.now()
+  });
+  state.sheetIsNew = false;
+  return true;
+}
+
+/* ---------- Déclaration Urssaf ---------- */
+
+function openUrssaf(decl) {
+  const isNew = !decl;
+  state.editing = decl?.id || null;
+  state.sheetIsNew = isNew;
+  state.sheetOwner = decl?.id || uid();
+  state.sheetReceipts = [];
+
+  $('#urssaf-sheet-title').textContent = isNew ? 'Nouvelle déclaration' : 'Modifier la déclaration';
+  $('#us-delete').hidden = isNew;
+  $('#us-month').value       = decl?.month || `${state.year}-01`;
+  $('#us-bnc').value         = decl?.bnc ? num(decl.bnc) : '';
+  $('#us-bic-service').value = decl?.bicService ? num(decl.bicService) : '';
+  $('#us-bic-vente').value   = decl?.bicVente ? num(decl.bicVente) : '';
+  $('#us-cotis').value       = decl?.cotisations ? num(decl.cotisations) : '';
+  $('#us-cfp').value         = decl?.cfp ? num(decl.cfp) : '';
+  $('#us-vfl').value         = decl?.vflAmount ? num(decl.vflAmount) : '';
+  $('#us-vfl-option').checked = decl ? !!decl.vfl : !!settings.vfl;
+
+  updateUrssafPreview();
+  openSheet('dlg-urssaf');
+}
+
+function updateUrssafPreview() {
+  const bnc = parseAmount($('#us-bnc').value);
+  const bic = parseAmount($('#us-bic-service').value);
+  const vente = parseAmount($('#us-bic-vente').value);
+  const ca = bnc + bic + vente;
+  const due = parseAmount($('#us-cotis').value) + parseAmount($('#us-cfp').value) + parseAmount($('#us-vfl').value);
+
+  const box = $('#us-check');
+  if (ca <= 0) { box.textContent = 'Renseigne au moins une nature de chiffre d\'affaires.'; return; }
+
+  const net = ca - due;
+  box.innerHTML = `Chiffre d'affaires : <strong>${eur(ca)}</strong><br>
+    Prélèvements : ${eur(due)} soit ${num((due / ca) * 100, 1)} %<br>
+    Reste net : <strong>${eur(net)}</strong>`;
+}
+
+async function saveUrssaf() {
+  const month = $('#us-month').value;
+  if (!month) { toast('Indique la période déclarée.'); return false; }
+
+  const bnc = parseAmount($('#us-bnc').value);
+  const bicService = parseAmount($('#us-bic-service').value);
+  const bicVente = parseAmount($('#us-bic-vente').value);
+  const totalCa = bnc + bicService + bicVente;
+  if (totalCa <= 0) { toast('Indique un chiffre d\'affaires.'); return false; }
+
+  const cotisations = parseAmount($('#us-cotis').value);
+  const cfp = parseAmount($('#us-cfp').value);
+  const vflAmount = parseAmount($('#us-vfl').value);
+
+  const previous = await db.get('urssaf', state.sheetOwner);
+  await db.put('urssaf', {
+    ...(previous || {}),
+    id: state.sheetOwner,
+    month,
+    year: Number(month.slice(0, 4)),
+    bnc, bicService, bicVente, totalCa,
+    cotisations, cfp, vflAmount,
+    totalDue: cotisations + cfp + vflAmount,
+    vfl: $('#us-vfl-option').checked,
     updatedAt: Date.now()
   });
   state.sheetIsNew = false;
@@ -1399,7 +1475,7 @@ async function importRoster(file, button) {
       return;
     }
 
-    const trips = nightsToTrips(roster.nights, baseAirports());
+    const trips = nightsToTrips(roster.nights, baseAirports(), roster.period);
     const existing = await db.all('trips');
 
     // Un séjour déjà présent au même départ et au même endroit ne sera pas dupliqué
@@ -1420,11 +1496,12 @@ async function importRoster(file, button) {
             end: t.end,
             year: yearOf(t.start),
             country: t.country,
-            city: '',
+            place: t.place,
             purpose: t.purpose,
-            lodged: true,
+            lodged: t.purpose === 'rotation',
+            endsAtBase: t.endsAtBase,
             nights: t.nights,
-            notes: `Importé du roster — escale ${t.place}`,
+            notes: t.purpose === 'domicile' ? 'Importé du roster — au domicile' : `Importé du roster — escale ${t.place}`,
             updatedAt: Date.now()
           });
         }
@@ -1441,13 +1518,16 @@ async function importRoster(file, button) {
       </div>
 
       <table class="grid" style="margin-bottom:14px">
-        <thead><tr><th>Période</th><th>Lieu</th><th class="num">Nuits</th><th>Nature</th></tr></thead>
+        <thead><tr><th>Début</th><th>Lieu</th><th class="num">Nuits</th><th>Nature</th></tr></thead>
         <tbody>${trips.map(t => `
           <tr>
             <td class="num" style="font-size:.78rem">${t.start.slice(8)}/${t.start.slice(5, 7)}</td>
-            <td>${escapeHtml(COUNTRY_BY_CODE[t.country] || t.country)} <span class="flag">${t.place}</span></td>
-            <td class="num">${t.nights}</td>
-            <td style="font-size:.75rem;color:var(--ink-3)">${t.purpose === 'base' ? 'en base' : 'escale'}</td>
+            <td>${t.place ? `<span class="flag" style="color:var(--brass)">${t.place}</span> ` : ''}${escapeHtml(COUNTRY_BY_CODE[t.country] || t.country)}</td>
+            <td class="num">${t.purpose === 'domicile' ? `${t.days} j` : t.nights}</td>
+            <td style="font-size:.75rem;color:var(--ink-3)">${
+              t.purpose === 'domicile' ? 'domicile'
+              : t.purpose === 'base' ? 'en base'
+              : (t.endsAtBase ? 'escale, retour base' : 'escale')}</td>
           </tr>`).join('')}
         </tbody>
         <tfoot><tr><td colspan="2">Total</td><td class="num">${totalNights}</td><td></td></tr></tfoot>
@@ -1821,6 +1901,7 @@ function bindEvents() {
     else if (row.dataset.trip) openTrip(await db.get('trips', row.dataset.trip));
     else if (row.dataset.payslip) openPayslip(await db.get('payslips', row.dataset.payslip));
     else if (row.dataset.revenue) openRevenue(await db.get('revenues', row.dataset.revenue));
+    else if (row.dataset.urssaf) openUrssaf(await db.get('urssaf', row.dataset.urssaf));
   });
 
   // Entrée en mode édition
@@ -1858,6 +1939,9 @@ function bindEvents() {
   // Conversion de devise
   $('#ex-currency').addEventListener('change', updateConversionHint);
   $('#ex-amount').addEventListener('input', updateConversionHint);
+
+  ['#us-bnc', '#us-bic-service', '#us-bic-vente', '#us-cotis', '#us-cfp', '#us-vfl']
+    .forEach(sel => $(sel).addEventListener('input', updateUrssafPreview));
 
   // Aperçu du bulletin recalculé à chaque frappe
   ['#ps-total-cur', '#ps-total-eur'].forEach(sel =>
@@ -1907,7 +1991,7 @@ function bindEvents() {
   const forms = [
     ['#form-expense', saveExpense], ['#form-trip', saveTrip],
     ['#form-payslip', savePayslip], ['#form-revenue', saveRevenue],
-    ['#form-settings', saveSettings]
+    ['#form-urssaf', saveUrssaf], ['#form-settings', saveSettings]
   ];
   for (const [sel, save] of forms) {
     $(sel).addEventListener('submit', async (e) => {
@@ -1927,7 +2011,8 @@ function bindEvents() {
     ['#ex-delete', 'expenses', 'Supprimer cette dépense et ses justificatifs ?'],
     ['#tr-delete', 'trips', 'Supprimer ce séjour ?'],
     ['#ps-delete', 'payslips', 'Supprimer ce bulletin ?'],
-    ['#rv-delete', 'revenues', 'Supprimer cette recette ?']
+    ['#rv-delete', 'revenues', 'Supprimer cette recette ?'],
+    ['#us-delete', 'urssaf', 'Supprimer cette déclaration ?']
   ];
   for (const [sel, store, question] of deletions) {
     $(sel).addEventListener('click', async () => {
@@ -1947,7 +2032,7 @@ function bindEvents() {
 
   // Purge des pièces abandonnées : uniquement sur les feuilles de saisie.
   // La visionneuse s'ouvre par-dessus une feuille ouverte et ne doit rien effacer.
-  ['#dlg-expense', '#dlg-trip', '#dlg-payslip', '#dlg-revenue']
+  ['#dlg-expense', '#dlg-trip', '#dlg-payslip', '#dlg-revenue', '#dlg-urssaf']
     .forEach(sel => $(sel).addEventListener('close', discardPendingReceipts));
 
   // Fermeture par appui sur le fond

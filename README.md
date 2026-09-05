@@ -79,8 +79,14 @@ La règle appliquée : **une nuit compte lorsque le planning porte une ligne hô
 tes jours de repos alors que tu es rentré chez toi — sur le planning d'août 2026, les dix jours
 `O_S PRG` du 15 au 24 n'ont aucun hébergement associé : ils ne sont pas comptés.
 
-Les nuits consécutives au même endroit sont regroupées en un seul séjour. Un séjour par nuit
-gonflerait le forfait d'escale, qui accorde une demi-indemnité de retour par séjour.
+Les journées consécutives au même endroit sont regroupées en un seul séjour, qui couvre
+exactement les jours de ses nuits. Il ne déborde pas sur le lendemain : sinon le jour du retour
+serait compté deux fois, dans le pays quitté et dans celui rejoint, et le total des jours
+dépasserait celui des nuits.
+
+Les journées sans hébergement sont rattachées au domicile et comptées en France. Sur le planning
+d'août 2026, cela donne 20 nuits d'escale et 11 jours au domicile, soit les 31 jours du mois sans
+trou ni recouvrement.
 
 Avant d'importer, renseigne dans les réglages les **aéroports de logement en base**
 (par exemple `DUS`). Les nuits qui s'y déroulent seront classées en présence en base plutôt qu'en
@@ -255,6 +261,10 @@ Quatre garde-fous sont intégrés :
   l'import puisque les hôtels du roster sont des réservations employeur, et la part retenue est
   fixée à 35 %. **Le prix réel de l'hôtel n'a pas à être connu** : le barème est forfaitaire et sa
   ventilation est réglementaire.
+
+- **Demi-indemnité de retour.** Elle ne s'accorde qu'au terme d'une rotation, sur le séjour suivi
+  d'un retour au domicile — pas sur chaque escale d'un enchaînement. Pour le dernier séjour d'une
+  période importée, rien n'est accordé puisque la suite est inconnue ; la case reste cochable.
 
 - **Per diem supérieur au forfait.** Si la compagnie verse plus que le barème ne permet de déduire,
   opter pour le forfait fait réintégrer plus qu'il ne fait déduire. Le tableau de bord le signale.

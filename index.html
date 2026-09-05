@@ -383,9 +383,16 @@
       </div>
     </div>
 
-    <div class="field">
-      <label for="tr-country">Pays</label>
-      <select id="tr-country"></select>
+    <div class="field-row">
+      <div class="field">
+        <label for="tr-country">Pays</label>
+        <select id="tr-country"></select>
+      </div>
+      <div class="field">
+        <label for="tr-place">Escale</label>
+        <input type="text" id="tr-place" placeholder="DUS" maxlength="4" autocomplete="off"
+               style="font-family:var(--font-num);text-transform:uppercase">
+      </div>
     </div>
 
     <div class="field">
@@ -399,6 +406,14 @@
         <option value="autre">Autre</option>
       </select>
     </div>
+
+    <label class="inline-check">
+      <input type="checkbox" id="tr-base-return">
+      <span>Retour en base à l'issue du séjour
+        <small>Ouvre la demi-indemnité de retour. À ne cocher que pour la dernière escale
+        d'une rotation, celle qui se termine par un retour vers ta base.</small>
+      </span>
+    </label>
 
     <label class="inline-check">
       <input type="checkbox" id="tr-lodged">
@@ -792,6 +807,66 @@
     </div>
     <div class="btn-row" style="margin-top:8px">
       <button type="button" class="btn btn-danger btn-block" id="st-wipe">Tout effacer</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- ============ Feuille : déclaration Urssaf ============ -->
+<dialog class="sheet" id="dlg-urssaf">
+  <form method="dialog" class="sheet-body" id="form-urssaf">
+    <div class="sheet-grip"></div>
+    <div class="sheet-head">
+      <h2 id="urssaf-sheet-title">Déclaration Urssaf</h2>
+      <button type="button" class="btn btn-ghost" data-close style="padding:8px 12px;min-height:36px">Fermer</button>
+    </div>
+
+    <div class="field">
+      <label for="us-month">Période déclarée</label>
+      <input type="month" id="us-month" required>
+    </div>
+
+    <h3 style="margin:16px 0 8px">Chiffre d'affaires par nature</h3>
+    <div class="field">
+      <label for="us-bnc">Activités libérales (BNC)</label>
+      <input type="text" inputmode="decimal" id="us-bnc" placeholder="0,00">
+    </div>
+    <div class="field">
+      <label for="us-bic-service">Prestations de services (BIC)</label>
+      <input type="text" inputmode="decimal" id="us-bic-service" placeholder="0,00">
+    </div>
+    <div class="field">
+      <label for="us-bic-vente">Ventes de marchandises (BIC)</label>
+      <input type="text" inputmode="decimal" id="us-bic-vente" placeholder="0,00">
+    </div>
+
+    <h3 style="margin:16px 0 8px">Prélèvements</h3>
+    <div class="field-row-3">
+      <div class="field">
+        <label for="us-cotis">Cotisations</label>
+        <input type="text" inputmode="decimal" id="us-cotis" placeholder="0,00">
+      </div>
+      <div class="field">
+        <label for="us-cfp">CFP</label>
+        <input type="text" inputmode="decimal" id="us-cfp" placeholder="0,00">
+      </div>
+      <div class="field">
+        <label for="us-vfl">Vers. libératoire</label>
+        <input type="text" inputmode="decimal" id="us-vfl" placeholder="0,00">
+      </div>
+    </div>
+
+    <label class="inline-check">
+      <input type="checkbox" id="us-vfl-option">
+      <span>Versement libératoire actif sur cette période</span>
+    </label>
+
+    <div class="notice" id="us-check"></div>
+
+    <div class="btn-row">
+      <button type="submit" class="btn btn-primary btn-block">Enregistrer</button>
+    </div>
+    <div class="btn-row" style="margin-top:8px">
+      <button type="button" class="btn btn-danger btn-block" id="us-delete" hidden>Supprimer cette déclaration</button>
     </div>
   </form>
 </dialog>

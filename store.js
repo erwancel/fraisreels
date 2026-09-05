@@ -99,6 +99,7 @@ const MICRO_RATES = {
 };
 
 const PURPOSES = {
+  domicile:  'Au domicile',
   rotation:  'Rotation / découché',
   base:      'Présence en base',
   formation: 'Formation / simulateur',
@@ -579,7 +580,7 @@ function payslipBalance(p) {
 // Motifs qui n'ouvrent pas droit à indemnité d'escale : la présence en base
 // d'affectation relève de la double résidence, les missions Air One Aero
 // ne sont pas du salariat.
-const NO_ALLOWANCE_PURPOSES = new Set(['base', 'mission']);
+const NO_ALLOWANCE_PURPOSES = new Set(['base', 'mission', 'domicile']);
 
 function courrierRate(country) {
   const r = settings.courrier.rates;
@@ -607,9 +608,14 @@ function tripAllowance(trip) {
   const lodged = !!trip.lodged;
   const share = lodged ? Math.max(0, Math.min(100, c.lodgedRate ?? 100)) / 100 : 1;
   const rate = full * share;
-  const units = nights + (c.halfReturn ? 0.5 : 0);
 
-  return { eligible: true, nights, rate, fullRate: full, lodged, units, amount: units * rate };
+  // La demi-indemnité de retour ne se justifie qu'au terme d'une rotation,
+  // c'est-à-dire au retour vers la base contractuelle. Un enchaînement
+  // d'escales n'en ouvre qu'une seule, à la fin.
+  const half = c.halfReturn && trip.endsAtBase !== false;
+  const units = nights + (half ? 0.5 : 0);
+
+  return { eligible: true, nights, rate, fullRate: full, lodged, half, units, amount: units * rate };
 }
 
 function courrierTotals(trips) {
