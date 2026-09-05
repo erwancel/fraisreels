@@ -268,36 +268,39 @@ async function buildPdf(data) {
     synth.push([`Frais en courrier - ${data.courrier.nights} nuits d'escale`, pEur(data.courrierDeduction)]);
     synth.push(['Autres frais sur justificatifs', pEur(data.expensesDeductible)]);
   }
-  synth.push(['Total des frais reels', pEur(data.deductible)]);
-  synth.push([
-    data.advantage >= 0 ? 'Gain de base imposable en optant pour le reel' : "Ecart en faveur de l'abattement",
-    pEur(Math.abs(data.advantage))
-  ]);
+  const synthFoot = [
+    ['Total des frais reels', pEur(data.deductible)],
+    [data.advantage >= 0 ? 'Gain de base imposable en optant pour le reel' : "Ecart en faveur de l'abattement",
+     pEur(Math.abs(data.advantage))]
+  ];
 
   table({
-    theme: 'plain',
-    styles: { ...tableBase.styles, cellPadding: { top: 1.7, bottom: 1.7, left: 0, right: 0 } },
-    columnStyles: { 0: { cellWidth: 118 }, 1: { halign: 'right', fontStyle: 'bold' } },
-    body: synth
+    columnStyles: { 1: { halign: 'right', cellWidth: 38 } },
+    head: [['Poste', 'Montant']],
+    body: synth,
+    foot: synthFoot
   });
 
   // ---------- Salaire de source étrangère ----------
   if (data.foreignSalary > 0) {
     heading('Salaire de source etrangere');
     table({
-      theme: 'plain',
-      styles: { ...tableBase.styles, cellPadding: { top: 1.7, bottom: 1.7, left: 0, right: 0 } },
-      columnStyles: { 0: { cellWidth: 118 }, 1: { halign: 'right', fontStyle: 'bold' } },
+      columnStyles: { 1: { halign: 'right', cellWidth: 38 } },
+      head: [['Element', 'Montant']],
+      // Le pied donne le resultat du calcul mene juste au-dessus ;
+      // les montants pour memoire n'y entrent pas.
       body: [
         ['Base imposable locale, convertie en euros', pEur(data.grossSalary)],
-        ['Cotisations sociales salariales obligatoires', pEur(data.socialPaid)],
-        ['Base retenue pour la declaration francaise', pEur(data.taxableSalary)],
-        ['Indemnites de deplacement non imposables localement', pEur(data.allowances)],
-        ["Impot effectivement paye a l'etranger", pEur(data.foreignTax)]
-      ]
+        ['Cotisations sociales salariales obligatoires', '- ' + pEur(data.socialPaid)]
+      ],
+      foot: [['Base retenue pour la declaration francaise', pEur(data.taxableSalary)]]
     });
     y -= 3;
-    note("Conversion au taux porte par chaque bulletin. Traitement conventionnel a confirmer.");
+    note(
+      `Pour memoire : ${pEur(data.allowances)} d'indemnites de deplacement non imposables localement, ` +
+      `${pEur(data.foreignTax)} d'impot effectivement paye a l'etranger. ` +
+      `Conversion au taux porte par chaque bulletin. Traitement conventionnel a confirmer.`
+    );
     y += 5;
   }
 
