@@ -211,18 +211,40 @@ const tableBase = {
   }
 };
 
-/** Convertit un justificatif en image exploitable par jsPDF. */
+/**
+ * Convertit un justificatif en image exploitable par jsPDF.
+ *
+ * Les dimensions sont relevées avant de libérer le bitmap : après close(),
+ * width et height retombent à zéro et le rapport devient NaN, ce que jsPDF
+ * rejette.
+ */
 async function receiptToImage(blob) {
   const bitmap = await createImageBitmap(blob);
+  const width = bitmap.width;
+  const height = bitmap.height;
+
+  if (!width || !height) {
+    bitmap.close?.();
+    throw new Error('Dimensions nulles');
+  }
+
+  // Une photo de ticket dépasse largement ce qu'une demi-page peut rendre :
+  // la réduire allège le document sans perte visible à l'impression.
+  const max = 1400;
+  const scale = Math.min(1, max / Math.max(width, height));
+  const w = Math.round(width * scale);
+  const h = Math.round(height * scale);
+
   const canvas = document.createElement('canvas');
-  canvas.width = bitmap.width;
-  canvas.height = bitmap.height;
-  canvas.getContext('2d').drawImage(bitmap, 0, 0);
+  canvas.width = w;
+  canvas.height = h;
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, w, h);
   bitmap.close?.();
-  return {
-    dataUrl: canvas.toDataURL('image/jpeg', 0.82),
-    ratio: bitmap.height / bitmap.width
-  };
+
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+  if (!dataUrl.startsWith('data:image/jpeg')) throw new Error('Encodage impossible');
+
+  return { dataUrl, ratio: height / width };
 }
 
 async function buildPdf(data, { receipts = true } = {}) {
@@ -470,8 +492,12 @@ async function buildPdf(data, { receipts = true } = {}) {
             let w = colW - 6;
             let h = w * img.ratio;
             if (h > boxH - 6) { h = boxH - 6; w = h / img.ratio; }
+            if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
+              throw new Error(`Dimensions calculees invalides : ${w} x ${h}`);
+            }
             doc.addImage(img.dataUrl, 'JPEG', x + (colW - w) / 2, boxY + (boxH - h) / 2, w, h);
-          } catch {
+          } catch (err) {
+            console.error(`Justificatif ${proof.ref} non rendu :`, err);
             doc.setFont('helvetica', 'italic').setFontSize(8).setTextColor(180, 90, 70);
             doc.text('Image illisible', x + colW / 2, boxY + boxH / 2, { align: 'center' });
           }
