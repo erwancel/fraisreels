@@ -161,7 +161,7 @@
             <h2>Chiffre d'affaires Air One Aero</h2>
             <span style="display:flex;gap:6px">
               <button type="button" class="btn btn-ghost" id="add-revenue" style="padding:7px 12px;min-height:34px;font-size:.8rem">Ajouter</button>
-              <button type="button" class="btn btn-ghost" data-edit="revenues" style="padding:7px 12px;min-height:34px;font-size:.8rem">Modifier</button>
+              <button type="button" class="btn btn-ghost" data-edit="urssaf" style="padding:7px 12px;min-height:34px;font-size:.8rem">Modifier</button>
             </span>
           </div>
           <div class="btn-row" style="margin-bottom:12px">
@@ -169,12 +169,12 @@
             <input type="file" id="urssaf-file" accept="application/pdf" multiple hidden>
           </div>
           <div id="urssaf-summary"></div>
-          <div class="panel-head" id="urssaf-head" hidden style="margin-top:4px">
-            <h3 style="margin:0">Déclarations enregistrées</h3>
-            <button type="button" class="btn btn-ghost" data-edit="urssaf" style="padding:7px 12px;min-height:34px;font-size:.8rem">Modifier</button>
-          </div>
           <div class="log" id="urssaf-list"></div>
           <div id="revenue-totals"></div>
+          <div class="panel-head" id="revenue-head" hidden style="margin-top:10px">
+            <h3 style="margin:0">Recettes saisies à la main</h3>
+            <button type="button" class="btn btn-ghost" data-edit="revenues" style="padding:7px 12px;min-height:34px;font-size:.8rem">Modifier</button>
+          </div>
           <div class="log" id="revenue-list"></div>
         </div>
 
@@ -186,6 +186,8 @@
 
       <!-- ============ Bilan ============ -->
       <section class="view" id="view-report" role="tabpanel" hidden>
+        <div class="panel" id="tax-panel"></div>
+
         <div class="panel">
           <div class="panel-head">
             <h2>Report sur la déclaration</h2>
@@ -679,6 +681,43 @@
       <label for="st-rates">Taux de conversion vers l'euro</label>
       <textarea id="st-rates" spellcheck="false" style="font-family:var(--font-num);font-size:.85rem"></textarea>
       <p class="verdict-note" style="margin:6px 0 0">Une devise par ligne, au format <code>CHF=1.07</code>. Modifiable à tout moment.</p>
+    </div>
+
+    <h3 style="margin:18px 0 8px">Estimation de l'impôt — revenus <span id="tax-year-label"></span></h3>
+    <div class="notice" id="tax-scale-note"></div>
+    <div class="field-row">
+      <div class="field">
+        <label for="st-parts">Parts fiscales</label>
+        <input type="number" id="st-parts" min="1" max="10" step="0.5">
+      </div>
+      <div class="field">
+        <label for="st-withheld">Déjà prélevé (€)</label>
+        <input type="number" id="st-withheld" min="0" step="1">
+      </div>
+    </div>
+    <label class="inline-check">
+      <input type="checkbox" id="st-joint">
+      <span>Imposition commune
+        <small>Change le forfait de décote et son plafond.</small>
+      </span>
+    </label>
+    <div class="field">
+      <label for="st-other">Autres revenus nets imposables (€)</label>
+      <input type="number" id="st-other" min="0" step="1">
+      <p class="verdict-note" style="margin:6px 0 0">
+        Pensions, revenus fonciers et autres, <strong>déjà nets d'abattement</strong>.
+        Une pension alimentaire de 4 400 € se saisit à 3 960 € après l'abattement de 10 %.
+      </p>
+    </div>
+    <div class="field">
+      <label for="st-brackets">Barème par part</label>
+      <textarea id="st-brackets" spellcheck="false" rows="5"
+                style="font-family:var(--font-num);font-size:.85rem"></textarea>
+      <p class="verdict-note" style="margin:6px 0 0">
+        Une tranche par ligne, au format <code>11600=0</code> puis <code>29579=11</code>.
+        La dernière ligne s'écrit <code>*=45</code>. Ces réglages ne valent que pour l'année
+        sélectionnée en haut de l'écran : chaque année garde les siens.
+      </p>
     </div>
 
     <h3 style="margin:18px 0 8px">Frais en courrier</h3>

@@ -115,6 +115,160 @@ const ABATEMENT_DEFAULTS = {
   2026: { min: 509, max: 14555 }   // provisoire, à mettre à jour
 };
 
+/* ---------- Estimation de l'impôt sur le revenu ---------- */
+
+/* Un barème vaut pour une année de revenus précise et n'est voté qu'à la fin
+   de celle-ci. Les paramètres sont donc historisés : consulter une année passée
+   doit continuer d'utiliser le barème qui lui était applicable. */
+const TAX_SCALES = {
+  2024: {
+    brackets: [
+      { upTo: 11497,  rate: 0 },
+      { upTo: 29315,  rate: 0.11 },
+      { upTo: 83823,  rate: 0.30 },
+      { upTo: 180294, rate: 0.41 },
+      { upTo: null,   rate: 0.45 }
+    ],
+    decote: { single: 889, joint: 1470, rate: 0.4525, capSingle: 1964, capJoint: 3248 }
+  },
+  2025: {
+    brackets: [
+      { upTo: 11600,  rate: 0 },
+      { upTo: 29579,  rate: 0.11 },
+      { upTo: 84577,  rate: 0.30 },
+      { upTo: 181917, rate: 0.41 },
+      { upTo: null,   rate: 0.45 }
+    ],
+    decote: { single: 897, joint: 1483, rate: 0.4525, capSingle: 1982, capJoint: 3277 }
+  }
+};
+
+const TAX_DEFAULTS = {
+  parts: 1,
+  joint: false,
+  otherIncome: 0,        // autres revenus nets imposables, déjà abattus
+  withheld: 0,           // prélèvement à la source ou acomptes déjà versés
+  years: {}              // surcharges par année de revenus
+};
+
+/** Année dont le barème s'applique, avec repli sur la plus proche connue. */
+function scaleYearFor(year) {
+  const custom = settings.tax?.years?.[year];
+  if (custom?.brackets?.length) return year;
+  if (TAX_SCALES[year]) return year;
+
+  const known = Object.keys(TAX_SCALES).map(Number);
+  const earlier = known.filter(y => y <= year);
+  // Après la dernière année connue, on prolonge la plus récente ;
+  // avant la première, on remonte à la plus ancienne.
+  return earlier.length ? Math.max(...earlier) : Math.min(...known);
+}
+
+/** Paramètres applicables à une année : surcharge manuelle, sinon barème officiel. */
+function taxParams(year) {
+  const base = settings.tax || TAX_DEFAULTS;
+  const custom = base.years?.[year] || {};
+  const source = scaleYearFor(year);
+  const scale = TAX_SCALES[source] || TAX_SCALES[Math.max(...Object.keys(TAX_SCALES).map(Number))];
+
+  return {
+    parts:       custom.parts       ?? base.parts       ?? 1,
+    joint:       custom.joint       ?? base.joint       ?? false,
+    otherIncome: custom.otherIncome ?? base.otherIncome ?? 0,
+    withheld:    custom.withheld    ?? base.withheld    ?? 0,
+    brackets:    custom.brackets?.length ? custom.brackets : scale.brackets,
+    decote:      { ...scale.decote, ...(custom.decote || {}) },
+    scaleYear:   custom.brackets?.length ? year : source,
+    // Vrai lorsque aucun barème propre à l'année n'existe encore
+    provisional: !custom.brackets?.length && source !== year
+  };
+}
+
+/** Impôt brut sur un revenu par part, avant quotient. */
+function applyBrackets(perPart, brackets) {
+  let tax = 0, floor = 0;
+  for (const b of brackets) {
+    const ceiling = b.upTo ?? Infinity;
+    if (perPart > floor) tax += (Math.min(perPart, ceiling) - floor) * b.rate;
+    floor = ceiling;
+    if (perPart <= floor) break;
+  }
+  return tax;
+}
+
+/**
+ * Estimation de l'impôt dû.
+ *
+ * Le versement libératoire sort le chiffre d'affaires du barème mais il reste
+ * retenu pour déterminer le taux applicable aux autres revenus : on calcule
+ * l'impôt sur l'ensemble, puis on ne garde que la fraction correspondant aux
+ * revenus réellement soumis au barème.
+ */
+function estimateTax(d) {
+  const t = taxParams(d.year);
+  const parts = Math.max(1, Number(t.parts) || 1);
+
+  // Salaires : la déduction la plus favorable l'emporte
+  const useReal = d.deductible > d.abatement;
+  const salaryDeduction = Math.max(d.abatement, d.deductible);
+  const netSalary = Math.max(0, d.declaredSalary - salaryDeduction);
+
+  const other = Number(t.otherIncome) || 0;
+
+  // Micro-entreprise : hors barème avec le versement libératoire,
+  // mais toujours pris en compte pour le taux effectif
+  const microAtScale = settings.vfl ? 0 : d.netMicro;
+  const microForRate = d.netMicro;
+
+  const scaleBase = netSalary + other + microAtScale;
+  const totalBase = netSalary + other + microForRate;
+
+  const grossOnTotal = applyBrackets(totalBase / parts, t.brackets) * parts;
+  const effectiveShare = totalBase > 0 ? scaleBase / totalBase : 0;
+  const grossTax = grossOnTotal * effectiveShare;
+
+  // Décote
+  const dec = t.decote;
+  const cap = t.joint ? dec.capJoint : dec.capSingle;
+  const forfait = t.joint ? dec.joint : dec.single;
+  const decote = grossTax > 0 && grossTax < cap
+    ? Math.max(0, Math.min(grossTax, forfait - dec.rate * grossTax))
+    : 0;
+
+  const afterDecote = Math.max(0, grossTax - decote);
+
+  // Crédit d'impôt étranger, plafonné à l'impôt français correspondant
+  const foreignCredit = Math.min(d.foreignTax, afterDecote);
+  const netTax = Math.max(0, afterDecote - foreignCredit);
+
+  const withheld = Number(t.withheld) || 0;
+  const balance = netTax - withheld;
+
+  // Taux marginal atteint
+  const perPart = totalBase / parts;
+  let marginal = 0;
+  for (const b of t.brackets) {
+    if (perPart > (b.upTo ?? Infinity)) continue;
+    marginal = b.rate;
+    break;
+  }
+  if (perPart > (t.brackets.at(-2)?.upTo ?? Infinity)) marginal = t.brackets.at(-1).rate;
+
+  return {
+    parts, useReal, salaryDeduction, netSalary, other,
+    microAtScale, microForRate, vfl: !!settings.vfl,
+    scaleBase, totalBase, effectiveShare,
+    grossOnTotal, grossTax, decote, afterDecote,
+    foreignCredit, netTax, withheld, balance,
+    marginal,
+    averageRate: totalBase > 0 ? (netTax / totalBase) * 100 : 0,
+    vflPaid: d.vflPaid || 0,
+    scaleYear: t.scaleYear,
+    provisional: t.provisional,
+    brackets: t.brackets
+  };
+}
+
 /* ---------- Ouverture de la base ---------- */
 
 let _db = null;
@@ -219,6 +373,7 @@ const SETTINGS_DEFAULTS = {
   rates: { CHF: 1.06, GBP: 1.17, USD: 0.92, PLN: 0.23, CZK: 0.0413, DKK: 0.134,
            SEK: 0.088, NOK: 0.086, HUF: 0.0026, RON: 0.20, TRY: 0.028, MAD: 0.093, AED: 0.25 },
   abatement: {},          // { 2026: {min,max} } — surcharge manuelle
+  tax: null,              // paramètres d'estimation, complétés au chargement
   lastBackup: null,
 
   /* Frais en courrier — indemnités journalières d'escale.
@@ -253,6 +408,11 @@ async function loadSettings() {
   settings = { ...SETTINGS_DEFAULTS, ...stored };
   settings.rates = { ...SETTINGS_DEFAULTS.rates, ...(stored.rates || {}) };
   settings.abatement = { ...(stored.abatement || {}) };
+  settings.tax = {
+    ...TAX_DEFAULTS,
+    ...(stored.tax || {}),
+    years: { ...(stored.tax?.years || {}) }
+  };
   settings.courrier = {
     ...SETTINGS_DEFAULTS.courrier,
     ...(stored.courrier || {}),
@@ -639,7 +799,7 @@ async function computeYear(year) {
   // Écart entre ce qui a été déclaré et ce qui a été facturé
   const revenueGap = fromUrssaf && revenues.length ? declaredTotal - invoicedTotal : 0;
 
-  return {
+  const result = {
     year, expenses, trips, payslips, revenues, declarations,
     expensesDeductible: deductible,
     deductible: totalDeductible,
@@ -654,6 +814,9 @@ async function computeYear(year) {
     revenueRows, turnover, netMicro,
     fromUrssaf, cotisations, cfp, vflPaid, invoicedTotal, revenueGap
   };
+
+  result.tax = estimateTax(result);
+  return result;
 }
 
 /** Années présentes dans la base, plus l'année courante. */

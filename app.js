@@ -59,7 +59,9 @@ async function refresh() {
 
   // Les libellés des boutons et la barre reflètent l'état courant
   $$('[data-edit]').forEach(b => {
-    b.textContent = state.editList === b.dataset.edit ? 'Terminé' : 'Modifier';
+    const list = b.dataset.edit;
+    b.hidden = listRows(list).length === 0;
+    b.textContent = state.editList === list ? 'Terminé' : 'Modifier';
   });
   renderBulkBar();
 }
@@ -84,12 +86,19 @@ function switchView(view) {
 
 // Chaque liste sélectionnable, avec son magasin et l'attribut porté par ses lignes
 const LISTS = {
-  expenses: { store: 'expenses', attr: 'expense', one: 'dépense',     many: 'dépenses' },
-  trips:    { store: 'trips',    attr: 'trip',    one: 'séjour',      many: 'séjours' },
-  payslips: { store: 'payslips', attr: 'payslip', one: 'bulletin',    many: 'bulletins' },
-  revenues: { store: 'revenues', attr: 'revenue', one: 'recette',     many: 'recettes' },
-  urssaf:   { store: 'urssaf',   attr: 'urssaf',  one: 'déclaration', many: 'déclarations' }
+  expenses: { store: 'expenses', attr: 'expense', box: '#expense-list', one: 'dépense',     many: 'dépenses' },
+  trips:    { store: 'trips',    attr: 'trip',    box: '#trip-list',    one: 'séjour',      many: 'séjours' },
+  payslips: { store: 'payslips', attr: 'payslip', box: '#payslip-list', one: 'bulletin',    many: 'bulletins' },
+  revenues: { store: 'revenues', attr: 'revenue', box: '#revenue-list', one: 'recette',     many: 'recettes' },
+  urssaf:   { store: 'urssaf',   attr: 'urssaf',  box: '#urssaf-list',  one: 'déclaration', many: 'déclarations' }
 };
+
+/** Lignes réellement présentes dans une liste donnée. */
+function listRows(list) {
+  const cfg = LISTS[list];
+  if (!cfg) return [];
+  return $$(`[data-${cfg.attr}]`, $(cfg.box));
+}
 
 /** Case de sélection, présente uniquement quand la liste est en cours d'édition. */
 const pickMark = (list) => state.editList === list ? '<span class="pick"></span>' : '';
@@ -116,7 +125,7 @@ function toggleSelection(id) {
   renderBulkBar();
   // Mise à jour de la seule ligne concernée, sans reconstruire toute la vue
   const cfg = LISTS[state.editList];
-  const row = document.querySelector(`[data-${cfg.attr}="${CSS.escape(id)}"]`);
+  const row = $(cfg.box)?.querySelector(`[data-${cfg.attr}="${CSS.escape(id)}"]`);
   if (row) row.setAttribute('aria-pressed', state.selected.has(id) ? 'true' : 'false');
 }
 
@@ -124,7 +133,7 @@ function toggleSelection(id) {
 function visibleIds() {
   const cfg = LISTS[state.editList];
   if (!cfg) return [];
-  return $$(`[data-${cfg.attr}]`).map(el => el.dataset[cfg.attr]);
+  return listRows(state.editList).map(el => el.dataset[cfg.attr]);
 }
 
 function renderBulkBar() {
@@ -542,7 +551,6 @@ function renderIncome() {
       ${d.revenueGap > 0 ? 'Des recettes manquent dans l\'application.' : 'Des recettes saisies ne figurent pas dans les déclarations.'}
     </div>` : ''}` : '';
 
-  $('#urssaf-head').hidden = decls.length === 0;
   $('#urssaf-list').classList.toggle('is-editing', state.editList === 'urssaf');
   $('#urssaf-list').innerHTML = decls.length ? decls.map(x => {
     const rate = x.totalCa > 0 ? (x.totalDue / x.totalCa) * 100 : 0;
@@ -573,6 +581,7 @@ function renderIncome() {
     : '';
 
   const revs = [...d.revenues].sort((a, b) => b.date.localeCompare(a.date));
+  $('#revenue-head').hidden = revs.length === 0;
   $('#revenue-list').classList.toggle('is-editing', state.editList === 'revenues');
   $('#revenue-list').innerHTML = revs.length ? revs.map(r => {
     const { day, month } = dayMonth(r.date);
@@ -587,6 +596,108 @@ function renderIncome() {
         <span class="log-amount money gain">${eur(r.amount)}</span>
       </button>`;
   }).join('') : `<div class="empty">Aucune recette enregistrée pour ${d.year}.</div>`;
+}
+
+function renderTaxEstimate() {
+  const d = state.data;
+  const t = d.tax;
+  const pct = (n) => `${num(n, 1).replace(',0', '')} %`;
+
+  const line = (label, value, sub = '', tone = '') => `
+    <tr>
+      <td>${label}${sub ? `<br><small style="color:var(--ink-3)">${sub}</small>` : ''}</td>
+      <td class="num"${tone ? ` style="color:${tone}"` : ''}>${value}</td>
+    </tr>`;
+
+  const rows = [
+    line('Salaires déclarés', eur(d.declaredSalary),
+         d.useBrute && d.allowances ? 'per diem réintégré' : ''),
+    line(t.useReal ? 'Frais réels' : 'Abattement de 10 %',
+         `− ${eur(t.salaryDeduction)}`,
+         t.useReal ? 'plus avantageux que l\'abattement' : 'plus avantageux que le réel',
+         'var(--ink-3)')
+  ];
+
+  if (t.other) rows.push(line('Autres revenus nets', eur(t.other)));
+
+  if (t.vfl) {
+    rows.push(line('Chiffre d\'affaires micro', eur(t.microForRate),
+      'hors barème, retenu pour le taux effectif', 'var(--ink-3)'));
+  } else if (t.microAtScale) {
+    rows.push(line('Chiffre d\'affaires après abattement', eur(t.microAtScale)));
+  }
+
+  const detail = [
+    line('Impôt brut', eur(t.grossTax),
+         t.parts !== 1 ? `${num(t.parts, 1)} parts` : '1 part'),
+    t.decote ? line('Décote', `− ${eur(t.decote)}`, 'revenus modestes', 'var(--gain)') : '',
+    t.foreignCredit ? line('Crédit d\'impôt étranger', `− ${eur(t.foreignCredit)}`, '', 'var(--gain)') : '',
+    t.withheld ? line('Déjà prélevé', `− ${eur(t.withheld)}`, '', 'var(--gain)') : ''
+  ].filter(Boolean);
+
+  const owed = t.balance >= 0;
+
+  $('#tax-panel').innerHTML = `
+    <div class="panel-head">
+      <h2>Estimation de l'impôt</h2>
+      <span class="hint">revenus ${d.year}</span>
+    </div>
+
+    <div class="verdict-amounts" style="margin-bottom:16px">
+      <div>
+        <span class="label">${owed ? 'Reste à payer' : 'À te rembourser'}</span>
+        <span class="value" style="color:${owed ? 'var(--ink)' : 'var(--gain)'}">${eur0(Math.abs(t.balance))}</span>
+      </div>
+      <div class="right">
+        <span class="label">Taux moyen</span>
+        <span class="value" style="color:var(--ink-2)">${pct(t.averageRate)}</span>
+      </div>
+    </div>
+
+    <table class="grid">
+      <tbody>${rows.join('')}</tbody>
+      <tfoot><tr><td>Base imposable au barème</td><td class="num">${eur(t.scaleBase)}</td></tr></tfoot>
+    </table>
+
+    <table class="grid" style="margin-top:14px">
+      <tbody>${detail.join('')}</tbody>
+      <tfoot><tr>
+        <td>${owed ? 'Impôt restant dû' : 'Trop-perçu'}</td>
+        <td class="num">${eur(Math.abs(t.balance))}</td>
+      </tr></tfoot>
+    </table>
+
+    ${t.vfl ? `<p class="verdict-note" style="margin-top:12px">
+      Le versement libératoire sort ton chiffre d'affaires du barème, mais il reste retenu pour
+      déterminer le taux appliqué à tes autres revenus. ${d.vflPaid ? `Tu as déjà versé
+      ${eur(d.vflPaid)} à ce titre auprès de l'Urssaf, en plus de l'impôt estimé ci-dessus.` : ''}
+    </p>` : ''}
+
+    <p class="verdict-note" style="margin-top:10px">
+      Taux marginal atteint : <strong>${pct(t.marginal * 100)}</strong>.
+      ${t.useReal
+        ? `Les frais réels te font économiser ${eur(estimateWithout(d))} d'impôt par rapport à l'abattement.`
+        : `Il te faudrait dépasser ${eur(d.abatement)} de frais pour que le réel devienne intéressant.`}
+    </p>
+
+    ${t.provisional ? `<div class="notice alert" style="margin:12px 0 0">
+      Le barème des revenus ${d.year} n'est pas encore voté. Ce calcul utilise celui de
+      ${t.scaleYear}, à titre indicatif. Les seuils sont réindexés chaque année, l'estimation
+      bougera donc légèrement.
+    </div>` : ''}
+
+    <div class="notice alert" style="margin:12px 0 0">
+      Estimation simplifiée, à partir du barème ${t.scaleYear} et de la décote applicable. Elle
+      ignore les réductions et crédits d'impôt, le plafonnement du quotient familial et les revenus
+      de capitaux. Avant de déclarer, recoupe avec le simulateur officiel sur impots.gouv.fr.
+    </div>`;
+}
+
+/** Écart d'impôt entre les frais réels et l'abattement forfaitaire. */
+function estimateWithout(d) {
+  const saved = d.deductible - d.abatement;
+  if (saved <= 0) return 0;
+  return saved * d.tax.marginal;
 }
 
 /* ===========================================================
@@ -614,6 +725,7 @@ function reportDetailText() {
 function renderReport() {
   const d = state.data;
   $('#report-year-label').textContent = `revenus ${d.year}`;
+  renderTaxEstimate();
 
   const foreign = d.foreignSalary > 0;
 
@@ -1058,6 +1170,26 @@ async function saveRevenue() {
 
 /* ---------- Réglages ---------- */
 
+/** « 11600=0 » par ligne, la dernière tranche s'écrivant « *=45 ». */
+function bracketsToText(brackets) {
+  return brackets.map(b => `${b.upTo ?? '*'}=${(b.rate * 100).toString().replace('.', ',')}`).join('\n');
+}
+
+function textToBrackets(text) {
+  const out = [];
+  for (const line of text.split('\n')) {
+    const m = line.trim().match(/^(\*|\d+)\s*=\s*([\d.,]+)$/);
+    if (!m) continue;
+    out.push({
+      upTo: m[1] === '*' ? null : Number(m[1]),
+      rate: parseAmount(m[2]) / 100
+    });
+  }
+  // Un barème incomplet rendrait l'estimation absurde
+  if (out.length < 2 || !out.some(b => b.upTo === null)) return taxParams(state.year).brackets;
+  return out.sort((a, b) => (a.upTo ?? Infinity) - (b.upTo ?? Infinity));
+}
+
 function ratesToText(rates) {
   return Object.entries(rates).map(([k, v]) => `${k}=${v}`).join('\n');
 }
@@ -1082,6 +1214,18 @@ function openSettings() {
   $('#st-vfl').checked = !!settings.vfl;
   $('#st-theme').value = settings.theme || 'auto';
   $('#st-rates').value = ratesToText(settings.rates);
+
+  const tp = taxParams(state.year);
+  $('#tax-year-label').textContent = state.year;
+  $('#st-parts').value    = tp.parts;
+  $('#st-withheld').value = tp.withheld || 0;
+  $('#st-joint').checked  = !!tp.joint;
+  $('#st-other').value    = tp.otherIncome || 0;
+  $('#st-brackets').value = bracketsToText(tp.brackets);
+  $('#tax-scale-note').innerHTML = tp.provisional
+    ? `Aucun barème n'est encore publié pour les revenus ${state.year}. Celui de ${tp.scaleYear} est
+       utilisé en attendant la loi de finances. Remplace-le dès qu'il est voté.`
+    : `Barème applicable aux revenus ${tp.scaleYear}.`;
 
   $('#st-courrier').checked        = !!settings.courrier.enabled;
   $('#st-courrier-half').checked   = settings.courrier.halfReturn !== false;
@@ -1112,6 +1256,22 @@ async function saveSettings() {
   await saveSetting('vfl', $('#st-vfl').checked);
   await saveSetting('theme', $('#st-theme').value);
   await saveSetting('rates', textToRates($('#st-rates').value));
+
+  // Chaque année conserve ses propres paramètres : un barème voté en 2027
+  // ne doit pas modifier rétroactivement une déclaration déjà faite.
+  const years = { ...(settings.tax?.years || {}) };
+  const typed = textToBrackets($('#st-brackets').value);
+  const official = TAX_SCALES[scaleYearFor(state.year)]?.brackets;
+  years[state.year] = {
+    parts: Math.max(1, Number($('#st-parts').value) || 1),
+    joint: $('#st-joint').checked,
+    otherIncome: Number($('#st-other').value) || 0,
+    withheld: Number($('#st-withheld').value) || 0,
+    // On n'enregistre le barème que s'il diffère de l'officiel, pour continuer
+    // à bénéficier des mises à jour ultérieures
+    brackets: JSON.stringify(typed) === JSON.stringify(official) ? null : typed
+  };
+  await saveSetting('tax', { ...settings.tax, years });
 
   await saveSetting('courrier', {
     enabled: $('#st-courrier').checked,
@@ -1612,6 +1772,7 @@ function bindEvents() {
 
   $('#year-picker').addEventListener('change', e => {
     state.year = Number(e.target.value);
+    if ($('#dlg-settings').open) openSettings();
     refresh();
   });
 

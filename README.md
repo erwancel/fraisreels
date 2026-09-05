@@ -201,6 +201,10 @@ Pendant la sélection, appuyer sur une ligne la coche au lieu de l'ouvrir. La su
 confirmation et efface aussi les justificatifs attachés. Changer d'onglet quitte le mode et
 abandonne la sélection.
 
+Un bouton **Modifier** n'apparaît que si sa liste contient quelque chose. Sur l'écran Revenus,
+celui du haut agit sur les déclarations Urssaf, qui sont la source du chiffre d'affaires ; un
+second apparaît sous le tableau dès que des recettes ont été saisies à la main.
+
 Le filtre et la recherche restent actifs en mode sélection : « Tout » ne coche que les lignes
 effectivement affichées, ce qui permet par exemple de supprimer d'un coup toutes les dépenses
 d'un poste donné.
@@ -270,6 +274,48 @@ requise pour la part forfaitaire.
 
 Le tableau de bord signale par ailleurs tout total de frais dépassant 55 % du salaire déclaré.
 Une déclaration de cet ordre attire l'attention et doit pouvoir être justifiée ligne par ligne.
+
+## Estimation de l'impôt
+
+L'écran Bilan ouvre sur une estimation du solde à payer, construite à partir du barème progressif,
+du quotient familial et de la décote.
+
+La chaîne de calcul : salaires déclarés, moins la déduction la plus favorable entre l'abattement de
+10 % et les frais réels ; plus les autres revenus nets saisis dans les réglages ; plus le chiffre
+d'affaires micro après abattement. Le barème s'applique au revenu par part, la décote vient en
+déduction, puis le crédit d'impôt étranger et ce qui a déjà été prélevé.
+
+Avec le versement libératoire, le chiffre d'affaires sort du barème mais reste retenu pour
+déterminer le taux appliqué aux autres revenus. L'app calcule l'impôt sur l'ensemble puis n'en
+garde que la fraction correspondant aux revenus réellement soumis au barème.
+
+Un barème ne vaut que pour une année de revenus, et il n'est voté qu'à la fin de celle-ci. Tous
+les paramètres fiscaux sont donc **rattachés à l'année sélectionnée en haut de l'écran** : barème,
+décote, parts, autres revenus et montant déjà prélevé. Consulter une année passée continue
+d'utiliser le barème qui lui était applicable, et enregistrer le barème 2026 en 2027 ne modifiera
+pas rétroactivement la déclaration 2025.
+
+Deux barèmes sont fournis :
+
+| Tranche par part | Revenus 2024 | Revenus 2025 |
+|---|---|---|
+| 0 % | jusqu'à 11 497 € | jusqu'à 11 600 € |
+| 11 % | 29 315 € | 29 579 € |
+| 30 % | 83 823 € | 84 577 € |
+| 41 % | 180 294 € | 181 917 € |
+| 45 % | au-delà | au-delà |
+| Décote | 889 / 1 470 € | 897 / 1 483 € |
+| Plafond de décote | 1 964 / 3 248 € | 1 982 / 3 277 € |
+
+Décote : forfait moins 45,25 % de l'impôt brut, article 197-I-4 du CGI.
+
+Pour une année sans barème publié, celui de l'année connue la plus proche est utilisé et
+l'estimation est signalée comme provisoire, dans les réglages comme dans le bilan. Un barème saisi
+à la main n'est enregistré que s'il diffère de l'officiel : sans quoi l'année continue de suivre
+les mises à jour.
+
+L'estimation ignore les réductions et crédits d'impôt, le plafonnement du quotient familial et les
+revenus de capitaux. Elle sert à savoir où l'on va, pas à remplacer le simulateur officiel.
 
 ## Le comparateur
 
