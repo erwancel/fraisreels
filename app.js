@@ -307,10 +307,44 @@ function renderBoard() {
   renderBackupWarning();
 }
 
+/** Mois échus pour lesquels une pièce manque encore. */
+function renderCoverage() {
+  const d = state.data;
+  const c = d.coverage;
+  if (!c || !c.total) return '';
+
+  const label = (m) => `${MONTH_LABELS[Number(m.slice(5, 7)) - 1]}`;
+  const ligne = (titre, mois) => mois.length
+    ? `<tr><td>${titre}</td><td class="num" style="color:var(--warn)">${mois.map(label).join(', ')}</td></tr>`
+    : '';
+
+  const lignes = [
+    ligne('Bulletins de paie', c.gaps.payslips),
+    ligne('Déclarations Urssaf', c.gaps.declarations),
+    ligne('Plannings', c.gaps.rosters)
+  ].filter(Boolean).join('');
+
+  return `<div class="notice alert">
+    <strong>${c.total} pièce${c.total > 1 ? 's' : ''} manquante${c.total > 1 ? 's' : ''}</strong>
+    sur la période ${label(c.start)} – ${label(c.end)} :
+    <table class="grid" style="margin-top:8px">${lignes}</table>
+  </div>`;
+}
+
 function renderBackupWarning() {
   const d = state.data;
   const el = $('#board-backup-warning');
   const blocks = [];
+
+  if (d.closure) {
+    blocks.push(`<div class="notice">
+      Année déclarée le ${new Date(d.closure.at).toLocaleDateString('fr-FR')}.
+      Les données sont figées : toute modification demandera confirmation.
+    </div>`);
+  } else {
+    const gaps = renderCoverage();
+    if (gaps) blocks.push(gaps);
+  }
 
   // Des frais réels approchant le salaire déclaré appellent une vérification :
   // c'est le premier motif de contrôle sur ce type de déclaration.
@@ -409,11 +443,178 @@ function renderExpenses() {
   list.sort((a, b) => b.date.localeCompare(a.date));
   const total = list.reduce((s, e) => s + toEur(e.amount, e.currency), 0);
 
+  renderRecurring();
   $('#expense-list').classList.toggle('is-editing', state.editList === 'expenses');
   $('#expense-list').innerHTML = list.length
     ? list.map(e => expenseRow(e, 'expenses')).join('') +
       `<div class="log-total"><span>${list.length} ligne${list.length > 1 ? 's' : ''}</span><span class="money">${eur(total)}</span></div>`
     : `<div class="empty"><strong>Aucune dépense</strong>${state.search || state.filter !== 'all' ? 'Aucun résultat pour ce filtre.' : 'Appuie sur + pour commencer.'}</div>`;
+}
+
+/* ===========================================================
+   Dépenses récurrentes
+   =========================================================== */
+
+/** Mois dus par un modèle, entre son début et le mois courant. */
+function dueMonths(model, existing) {
+  const already = new Set(existing
+    .filter(e => e.recurringId === model.id)
+    .map(e => e.date.slice(0, 7)));
+
+  const now = new Date();
+  const last = model.to || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const out = [];
+
+  let cur = model.from;
+  // Garde-fou : un modèle mal borné ne doit pas produire des milliers de lignes
+  for (let i = 0; i < 240 && cur <= last; i++) {
+    if (!already.has(cur)) out.push(cur);
+    const [y, m] = cur.split('-').map(Number);
+    cur = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
+  }
+  return out;
+}
+
+async function renderRecurring() {
+  const models = await db.all('recurring');
+  const box = $('#recurring-panel');
+
+  if (!models.length) {
+    box.innerHTML = `
+      <div class="panel-head">
+        <h2>Dépenses récurrentes</h2>
+        <button type="button" class="btn btn-ghost" id="add-recurring" style="padding:7px 12px;min-height:34px;font-size:.8rem">Ajouter</button>
+      </div>
+      <p class="verdict-note" style="margin:0">
+        Loyer, abonnement, part professionnelle du téléphone : un modèle génère les échéances
+        mois par mois, plutôt que douze saisies identiques.
+      </p>`;
+    $('#add-recurring').addEventListener('click', () => openRecurring(null));
+    return;
+  }
+
+  const allExpenses = await db.all('expenses');
+  let totalDue = 0;
+  const rows = models.map(m => {
+    const due = dueMonths(m, allExpenses);
+    totalDue += due.length;
+    return `
+      <tr data-recurring="${m.id}" style="cursor:pointer">
+        <td>${escapeHtml(m.label)}<br><small style="color:var(--ink-3)">${escapeHtml(CAT_BY_ID[m.category]?.label || '')}</small></td>
+        <td class="num">${eur(toEur(m.amount, m.currency))}</td>
+        <td class="num"${due.length ? ' style="color:var(--warn)"' : ' style="color:var(--ink-3)"'}>${due.length || '—'}</td>
+      </tr>`;
+  }).join('');
+
+  box.innerHTML = `
+    <div class="panel-head">
+      <h2>Dépenses récurrentes</h2>
+      <button type="button" class="btn btn-ghost" id="add-recurring" style="padding:7px 12px;min-height:34px;font-size:.8rem">Ajouter</button>
+    </div>
+    <table class="grid">
+      <thead><tr><th>Modèle</th><th class="num">Par mois</th><th class="num">En attente</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    ${totalDue ? `<div class="btn-row" style="margin-top:12px">
+      <button type="button" class="btn btn-primary btn-block" id="generate-recurring">Créer les ${totalDue} échéance${totalDue > 1 ? 's' : ''} en attente</button>
+    </div>` : ''}`;
+
+  $('#add-recurring').addEventListener('click', () => openRecurring(null));
+  $('#generate-recurring')?.addEventListener('click', generateRecurring);
+  $$('[data-recurring]', box).forEach(tr => tr.addEventListener('click', async () => {
+    openRecurring(await db.get('recurring', tr.dataset.recurring));
+  }));
+}
+
+async function generateRecurring() {
+  const models = await db.all('recurring');
+  const allExpenses = await db.all('expenses');
+  let created = 0;
+
+  for (const m of models) {
+    for (const month of dueMonths(m, allExpenses)) {
+      const day = String(Math.min(28, Math.max(1, m.day || 1))).padStart(2, '0');
+      const date = `${month}-${day}`;
+      await db.put('expenses', {
+        id: uid(),
+        recurringId: m.id,
+        date,
+        year: yearOf(date),
+        amount: m.amount,
+        currency: m.currency,
+        category: m.category,
+        label: m.label,
+        country: m.country,
+        attach: 'salaire',
+        share: m.share ?? 100,
+        payment: 'prelevement',
+        reimbursed: false,
+        notes: 'Générée depuis un modèle récurrent',
+        receiptIds: [],
+        updatedAt: Date.now()
+      });
+      created++;
+    }
+  }
+
+  await rebuildYears();
+  await refresh();
+  toast(`${created} échéance${created > 1 ? 's' : ''} créée${created > 1 ? 's' : ''}. Pense à joindre les justificatifs.`);
+}
+
+function openRecurring(model) {
+  const isNew = !model;
+  state.editing = model?.id || null;
+  state.sheetIsNew = isNew;
+  state.sheetOwner = model?.id || uid();
+  state.sheetReceipts = [];
+
+  const now = new Date();
+  $('#rec-sheet-title').textContent = isNew ? 'Nouvelle dépense récurrente' : 'Modifier le modèle';
+  $('#rc-delete').hidden = isNew;
+  $('#rc-label').value    = model?.label || '';
+  $('#rc-amount').value   = model ? num(model.amount) : '';
+  $('#rc-currency').value = model?.currency || 'EUR';
+  $('#rc-from').value     = model?.from || `${state.year}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  $('#rc-to').value       = model?.to || '';
+  $('#rc-day').value      = model?.day ?? 1;
+  $('#rc-share').value    = model?.share ?? 100;
+  $('#rc-country').value  = model?.country || 'FR';
+
+  const cat = model?.category || 'residence';
+  $$('#rc-categories .chip').forEach(c =>
+    c.setAttribute('aria-pressed', String(c.dataset.cat === cat)));
+
+  openSheet('dlg-recurring');
+}
+
+async function saveRecurring() {
+  const label = $('#rc-label').value.trim();
+  const amount = parseAmount($('#rc-amount').value);
+  const from = $('#rc-from').value;
+
+  if (!label) { toast('Donne un libellé à ce modèle.'); return false; }
+  if (amount <= 0) { toast('Indique un montant mensuel.'); return false; }
+  if (!from) { toast('Indique le premier mois.'); return false; }
+
+  const to = $('#rc-to').value;
+  if (to && to < from) { toast('Le dernier mois précède le premier.'); return false; }
+
+  const cat = $$('#rc-categories .chip').find(c => c.getAttribute('aria-pressed') === 'true');
+  await db.put('recurring', {
+    id: state.sheetOwner,
+    label,
+    amount,
+    currency: $('#rc-currency').value,
+    category: cat?.dataset.cat || 'autre',
+    from, to,
+    day: Math.min(28, Math.max(1, Number($('#rc-day').value) || 1)),
+    share: Math.min(100, Math.max(0, Number($('#rc-share').value) || 100)),
+    country: $('#rc-country').value,
+    updatedAt: Date.now()
+  });
+  state.sheetIsNew = false;
+  return true;
 }
 
 /* ===========================================================
@@ -709,6 +910,105 @@ function renderTaxEstimate() {
     </div>`;
 }
 
+/** Clôture d'une année : figer les données et retenir ce qui a été déclaré. */
+function renderClosure() {
+  const d = state.data;
+  const c = d.closure;
+
+  if (c) {
+    const ecart = (reel, estime) => {
+      if (!reel && reel !== 0) return '<span style="color:var(--ink-3)">non renseigné</span>';
+      const diff = reel - estime;
+      if (Math.abs(diff) < 1) return `${eur(reel)} <span style="color:var(--gain)">conforme</span>`;
+      return `${eur(reel)} <span style="color:var(--warn)">${diff > 0 ? '+' : ''}${eur(diff)}</span>`;
+    };
+
+    $('#closure-panel').innerHTML = `
+      <div class="panel-head">
+        <h2>Année déclarée</h2>
+        <span class="hint">${new Date(c.at).toLocaleDateString('fr-FR')}</span>
+      </div>
+      <table class="grid">
+        <thead><tr><th>Poste</th><th class="num">Estimé</th><th class="num">Déclaré</th></tr></thead>
+        <tbody>
+          <tr><td>Salaires</td><td class="num">${eur(d.declaredSalary)}</td><td class="num">${ecart(c.salary, d.declaredSalary)}</td></tr>
+          <tr><td>Frais réels</td><td class="num">${eur(d.deductible)}</td><td class="num">${ecart(c.frais, d.deductible)}</td></tr>
+          <tr><td>Chiffre d'affaires</td><td class="num">${eur(d.turnover)}</td><td class="num">${ecart(c.ca, d.turnover)}</td></tr>
+        </tbody>
+      </table>
+      ${c.note ? `<p class="verdict-note" style="margin-top:10px">${escapeHtml(c.note)}</p>` : ''}
+      <div class="btn-row" style="margin-top:12px">
+        <button type="button" class="btn btn-block" id="reopen-year">Rouvrir l'année</button>
+      </div>`;
+    $('#reopen-year').addEventListener('click', reopenYear);
+    return;
+  }
+
+  $('#closure-panel').innerHTML = `
+    <div class="panel-head">
+      <h2>Clôturer l'année</h2>
+      <span class="hint">${d.year}</span>
+    </div>
+    <p class="verdict-note" style="margin-top:0">
+      Une fois ta déclaration envoyée, note ce que tu as réellement déclaré. Les écarts avec
+      l'estimation apparaîtront ici, ce qui permet de la calibrer pour l'année suivante.
+    </p>
+    <div class="field-row-3" style="margin-top:12px">
+      <div class="field">
+        <label for="cl-salary">Salaires déclarés</label>
+        <input type="text" inputmode="decimal" id="cl-salary" placeholder="${num(d.declaredSalary)}">
+      </div>
+      <div class="field">
+        <label for="cl-frais">Frais réels</label>
+        <input type="text" inputmode="decimal" id="cl-frais" placeholder="${num(d.deductible)}">
+      </div>
+      <div class="field">
+        <label for="cl-ca">Chiffre d'affaires</label>
+        <input type="text" inputmode="decimal" id="cl-ca" placeholder="${num(d.turnover)}">
+      </div>
+    </div>
+    <div class="field">
+      <label for="cl-note">Note</label>
+      <input type="text" id="cl-note" placeholder="Traitement retenu, échanges avec le fiscaliste…">
+    </div>
+    <div class="btn-row">
+      <button type="button" class="btn btn-primary btn-block" id="close-year">Marquer ${d.year} comme déclarée</button>
+    </div>`;
+  $('#close-year').addEventListener('click', closeYear);
+}
+
+async function closeYear() {
+  const d = state.data;
+  if (d.coverage?.total && !confirm(
+      `${d.coverage.total} pièces manquent encore sur cette année. Clôturer quand même ?`)) return;
+
+  const val = (sel, fallback) => {
+    const v = parseAmount($(sel).value);
+    return v > 0 ? v : fallback;
+  };
+
+  const closed = { ...(settings.closed || {}) };
+  closed[d.year] = {
+    at: new Date().toISOString(),
+    salary: val('#cl-salary', d.declaredSalary),
+    frais: val('#cl-frais', d.deductible),
+    ca: val('#cl-ca', d.turnover),
+    note: $('#cl-note').value.trim()
+  };
+  await saveSetting('closed', closed);
+  await refresh();
+  toast(`${d.year} marquée comme déclarée.`);
+}
+
+async function reopenYear() {
+  if (!confirm('Rouvrir cette année et lever le verrou sur ses données ?')) return;
+  const closed = { ...(settings.closed || {}) };
+  delete closed[state.year];
+  await saveSetting('closed', closed);
+  await refresh();
+  toast('Année rouverte.');
+}
+
 /** Écart d'impôt entre les frais réels et l'abattement forfaitaire. */
 function estimateWithout(d) {
   const saved = d.deductible - d.abatement;
@@ -795,6 +1095,8 @@ function renderReport() {
       </table>
       ${d.missingProof ? `<div class="notice alert" style="margin-top:12px">${d.missingProof} dépense${d.missingProof > 1 ? 's' : ''} sans justificatif. En cas de contrôle, chaque ligne doit pouvoir être prouvée.</div>` : ''}`
     : `<div class="empty">Rien à détailler pour ${d.year}.</div>`;
+
+  renderClosure();
 
   $('#last-backup').textContent = settings.lastBackup
     ? `Dernière sauvegarde : ${new Date(settings.lastBackup).toLocaleString('fr-FR')}`
@@ -1500,6 +1802,7 @@ async function importRoster(file, button) {
   try {
     const items = await pdfItems(file);
     const roster = parseRoster(items);
+    const period = `${roster.startYear}-${String(roster.startMonth).padStart(2, '0')}`;
 
     if (!roster.nights.length) {
       toast('Aucune nuit d\'escale détectée dans ce planning.', 4000);
@@ -1520,6 +1823,23 @@ async function importRoster(file, button) {
     pendingImport = {
       kind: 'roster',
       apply: async () => {
+        // Le planning justifie chaque nuit d'escale : on l'archive avec sa période
+        const existingDoc = (await db.all('documents'))
+          .find(d => d.kind === 'roster' && d.period === period);
+        const docId = existingDoc?.id || uid();
+        for (const rid of existingDoc?.receiptIds || []) await db.remove('receipts', rid);
+        const rec = await addReceipt(file, docId);
+        await db.put('documents', {
+          id: docId,
+          kind: 'roster',
+          period,
+          year: roster.startYear,
+          label: `Planning ${period}`,
+          nights: roster.nights.length,
+          receiptIds: [rec.id],
+          updatedAt: Date.now()
+        });
+
         for (const t of fresh) {
           await db.put('trips', {
             id: uid(),
@@ -1536,7 +1856,7 @@ async function importRoster(file, button) {
             updatedAt: Date.now()
           });
         }
-        return `${fresh.length} séjour${fresh.length > 1 ? 's' : ''} ajouté${fresh.length > 1 ? 's' : ''}.`;
+        return `${fresh.length} séjour${fresh.length > 1 ? 's' : ''} ajouté${fresh.length > 1 ? 's' : ''}, planning archivé.`;
       }
     };
 
@@ -1576,10 +1896,10 @@ async function importRoster(file, button) {
 
       ${dupes ? `<div class="notice">${dupes} séjour${dupes > 1 ? 's' : ''} déjà enregistré${dupes > 1 ? 's' : ''} ${dupes > 1 ? 'seront ignorés' : 'sera ignoré'}.</div>` : ''}`;
 
-    $('#import-confirm').disabled = fresh.length === 0;
+    $('#import-confirm').disabled = false;
     $('#import-confirm').textContent = fresh.length
       ? `Enregistrer ${fresh.length} séjour${fresh.length > 1 ? 's' : ''}`
-      : 'Rien de nouveau à enregistrer';
+      : 'Archiver le planning seul';
     openSheet('dlg-import');
 
   } catch (err) {
@@ -1599,7 +1919,9 @@ async function importPayslips(files, button) {
     for (const file of files) {
       button.textContent = `Lecture de ${file.name}…`;
       try {
-        parsed.push(parsePayslipPdf(await pdfItems(file)));
+        const result = parsePayslipPdf(await pdfItems(file));
+        result.file = file;
+        parsed.push(result);
       } catch (err) {
         errors.push(`${file.name} : ${err.message}`);
       }
@@ -1623,8 +1945,15 @@ async function importPayslips(files, button) {
             || parsed.find(o => o.rate)?.rate
             || settings.rates[p.currency]
             || 1;
+          const id = previous?.id || uid();
+          // Le bulletin lui-même est archivé : c'est la pièce qu'on devra produire
+          const kept = [...(previous?.receiptIds || [])];
+          if (p.file) {
+            const rec = await addReceipt(p.file, id);
+            kept.push(rec.id);
+          }
           await db.put('payslips', {
-            id: previous?.id || uid(),
+            id,
             month: p.month,
             year: p.year,
             employer: p.employer,
@@ -1639,7 +1968,7 @@ async function importPayslips(files, button) {
             taxDisputed: previous?.taxDisputed ?? false,
             net: p.net,
             source: previous?.source || 'CZ',
-            receiptIds: previous?.receiptIds || [],
+            receiptIds: kept,
             updatedAt: Date.now()
           });
         }
@@ -1705,7 +2034,9 @@ async function importUrssaf(files, button) {
     for (const file of files) {
       button.textContent = `Lecture de ${file.name}…`;
       try {
-        parsed.push(parseUrssafPdf(await pdfItems(file)));
+        const result = parseUrssafPdf(await pdfItems(file));
+        result.file = file;
+        parsed.push(result);
       } catch (err) {
         errors.push(`${file.name} : ${err.message}`);
       }
@@ -1723,8 +2054,15 @@ async function importUrssaf(files, button) {
       kind: 'urssaf',
       apply: async () => {
         for (const p of parsed) {
+          const id = byMonth[p.month]?.id || uid();
+          const kept = [...(byMonth[p.month]?.receiptIds || [])];
+          if (p.file) {
+            const rec = await addReceipt(p.file, id);
+            kept.push(rec.id);
+          }
           await db.put('urssaf', {
-            id: byMonth[p.month]?.id || uid(),
+            id,
+            receiptIds: kept,
             month: p.month,
             year: p.year,
             quarter: p.quarter,
@@ -1858,6 +2196,11 @@ async function init() {
   const currencyOptions = CURRENCIES.map(c => `<option value="${c}">${c}</option>`).join('');
   $('#ex-currency').innerHTML = currencyOptions;
   $('#ps-currency').innerHTML = currencyOptions;
+  $('#rc-currency').innerHTML = currencyOptions;
+  fillSelect($('#rc-country'), COUNTRIES, 'code', 'name');
+  $('#rc-categories').innerHTML = CATEGORIES.map(c =>
+    `<button type="button" class="chip" data-cat="${c.id}" aria-pressed="false">${escapeHtml(c.label)}</button>`
+  ).join('');
   $('#ex-categories').innerHTML = CATEGORIES.map(c =>
     `<button type="button" class="chip" data-cat="${c.id}" aria-pressed="false" title="${escapeHtml(c.hint)}">${escapeHtml(c.label)}</button>`
   ).join('');
@@ -1900,8 +2243,10 @@ function bindEvents() {
 
   // Imports PDF
   $('#roster-file').addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (file) await importRoster(file, $('label[for="roster-file"]'));
+    const files = [...e.target.files];
+    const button = $('label[for="roster-file"]');
+    // Les plannings s'enchaînent : chacun est confirmé avant de passer au suivant
+    for (const file of files) await importRoster(file, button);
     e.target.value = '';
   });
   $('#payslip-file').addEventListener('change', async (e) => {
@@ -1965,11 +2310,13 @@ function bindEvents() {
   });
 
   // Chips de catégorie
-  $('#ex-categories').addEventListener('click', e => {
-    const chip = e.target.closest('.chip');
-    if (!chip) return;
-    $$('#ex-categories .chip').forEach(c => c.setAttribute('aria-pressed', String(c === chip)));
-  });
+  for (const sel of ['#ex-categories', '#rc-categories']) {
+    $(sel).addEventListener('click', e => {
+      const chip = e.target.closest('.chip');
+      if (!chip) return;
+      $$(`${sel} .chip`).forEach(c => c.setAttribute('aria-pressed', String(c === chip)));
+    });
+  }
 
   // Conversion de devise
   $('#ex-currency').addEventListener('change', updateConversionHint);
@@ -2026,11 +2373,14 @@ function bindEvents() {
   const forms = [
     ['#form-expense', saveExpense], ['#form-trip', saveTrip],
     ['#form-payslip', savePayslip], ['#form-revenue', saveRevenue],
-    ['#form-urssaf', saveUrssaf], ['#form-settings', saveSettings]
+    ['#form-urssaf', saveUrssaf], ['#form-recurring', saveRecurring],
+    ['#form-settings', saveSettings]
   ];
   for (const [sel, save] of forms) {
     $(sel).addEventListener('submit', async (e) => {
       e.preventDefault();
+      if (sel !== '#form-settings' && state.data?.closure &&
+          !confirm(`${state.year} a été déclarée. Modifier ces données quand même ?`)) return;
       const ok = await save();
       if (!ok) return;
       if (sel === '#form-settings') await loadSettings();
@@ -2047,7 +2397,8 @@ function bindEvents() {
     ['#tr-delete', 'trips', 'Supprimer ce séjour ?'],
     ['#ps-delete', 'payslips', 'Supprimer ce bulletin ?'],
     ['#rv-delete', 'revenues', 'Supprimer cette recette ?'],
-    ['#us-delete', 'urssaf', 'Supprimer cette déclaration ?']
+    ['#us-delete', 'urssaf', 'Supprimer cette déclaration ?'],
+    ['#rc-delete', 'recurring', 'Supprimer ce modèle ? Les dépenses déjà créées sont conservées.']
   ];
   for (const [sel, store, question] of deletions) {
     $(sel).addEventListener('click', async () => {
@@ -2067,7 +2418,7 @@ function bindEvents() {
 
   // Purge des pièces abandonnées : uniquement sur les feuilles de saisie.
   // La visionneuse s'ouvre par-dessus une feuille ouverte et ne doit rien effacer.
-  ['#dlg-expense', '#dlg-trip', '#dlg-payslip', '#dlg-revenue', '#dlg-urssaf']
+  ['#dlg-expense', '#dlg-trip', '#dlg-payslip', '#dlg-revenue', '#dlg-urssaf', '#dlg-recurring']
     .forEach(sel => $(sel).addEventListener('close', discardPendingReceipts));
 
   // Le défilement de la page reprend dès qu'aucune feuille n'est ouverte

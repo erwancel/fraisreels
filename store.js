@@ -4,8 +4,9 @@
    =========================================================== */
 
 const DB_NAME = 'frais-reels';
-const DB_VERSION = 2;
-const STORES = ['expenses', 'receipts', 'trips', 'payslips', 'revenues', 'urssaf', 'settings'];
+const DB_VERSION = 3;
+const STORES = ['expenses', 'receipts', 'trips', 'payslips', 'revenues', 'urssaf',
+               'documents', 'recurring', 'settings'];
 
 /* ---------- Référentiels ---------- */
 
@@ -115,6 +116,58 @@ const ABATEMENT_DEFAULTS = {
   2025: { min: 509, max: 14555 },
   2026: { min: 509, max: 14555 }   // provisoire, à mettre à jour
 };
+
+/* ---------- Couverture documentaire ---------- */
+
+const MONTH_KEYS = (year) =>
+  Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`);
+
+/**
+ * Repère les mois non documentés d'une année.
+ *
+ * Le contrôle ne porte que sur l'intervalle réellement concerné : du premier
+ * mois pour lequel une pièce existe jusqu'au dernier mois échu. Sans cette
+ * borne, une activité démarrée en juin ferait apparaître cinq mois manquants
+ * qui n'ont jamais eu lieu d'exister.
+ */
+function coverageGaps(year, payslips, declarations, documents) {
+  const today = new Date();
+  const lastMonth = year < today.getFullYear()
+    ? 12
+    : (year > today.getFullYear() ? 0 : today.getMonth());   // mois échus seulement
+
+  const has = {
+    payslips:     new Set(payslips.map(p => p.month).filter(Boolean)),
+    declarations: new Set(declarations.map(d => d.month).filter(Boolean)),
+    rosters:      new Set(documents.filter(d => d.kind === 'roster').map(d => d.period).filter(Boolean))
+  };
+
+  const known = [...has.payslips, ...has.declarations, ...has.rosters].sort();
+  if (!known.length || lastMonth === 0) return { start: null, gaps: {}, total: 0 };
+
+  const firstMonth = Number(known[0].slice(5, 7));
+  const range = MONTH_KEYS(year).filter(m => {
+    const n = Number(m.slice(5, 7));
+    return n >= firstMonth && n <= lastMonth;
+  });
+
+  const gaps = {
+    payslips:     range.filter(m => !has.payslips.has(m)),
+    declarations: range.filter(m => !has.declarations.has(m)),
+    rosters:      range.filter(m => !has.rosters.has(m))
+  };
+
+  return {
+    start: range[0],
+    end: range.at(-1),
+    range,
+    gaps,
+    total: gaps.payslips.length + gaps.declarations.length + gaps.rosters.length
+  };
+}
+
+/** Une année déclarée est close : ses données ne devraient plus bouger. */
+const yearClosure = (year) => settings.closed?.[year] || null;
 
 /* ---------- Estimation de l'impôt sur le revenu ---------- */
 
@@ -305,6 +358,15 @@ function openDB() {
         const s = db.createObjectStore('urssaf', { keyPath: 'id' });
         s.createIndex('year', 'year');
       }
+      // Pièces de référence conservées telles quelles : rosters, courriers
+      if (!db.objectStoreNames.contains('documents')) {
+        const s = db.createObjectStore('documents', { keyPath: 'id' });
+        s.createIndex('year', 'year');
+      }
+      // Modèles de dépenses répétées, générant leurs échéances
+      if (!db.objectStoreNames.contains('recurring')) {
+        db.createObjectStore('recurring', { keyPath: 'id' });
+      }
       if (!db.objectStoreNames.contains('settings')) {
         db.createObjectStore('settings', { keyPath: 'key' });
       }
@@ -372,6 +434,7 @@ const SETTINGS_DEFAULTS = {
   vfl: false,
   theme: 'auto',
   lastView: 'board',      // vue à rouvrir au démarrage
+  closed: {},             // années déclarées : { 2026: { at, salary, frais, ca, note } }
   rates: { CHF: 1.06, GBP: 1.17, USD: 0.92, PLN: 0.23, CZK: 0.0413, DKK: 0.134,
            SEK: 0.088, NOK: 0.086, HUF: 0.0026, RON: 0.20, TRY: 0.028, MAD: 0.093, AED: 0.25 },
   abatement: {},          // { 2026: {min,max} } — surcharge manuelle
@@ -410,6 +473,7 @@ async function loadSettings() {
   settings = { ...SETTINGS_DEFAULTS, ...stored };
   settings.rates = { ...SETTINGS_DEFAULTS.rates, ...(stored.rates || {}) };
   settings.abatement = { ...(stored.abatement || {}) };
+  settings.closed = { ...(stored.closed || {}) };
   settings.tax = {
     ...TAX_DEFAULTS,
     ...(stored.tax || {}),
@@ -689,12 +753,13 @@ function countryTally(trips) {
 
 /** Consolidation complète d'une année. */
 async function computeYear(year) {
-  const [expenses, trips, payslips, revenues, declarations] = await Promise.all([
+  const [expenses, trips, payslips, revenues, declarations, documents] = await Promise.all([
     db.byYear('expenses', year),
     db.byYear('trips', year),
     db.byYear('payslips', year),
     db.byYear('revenues', year),
-    db.byYear('urssaf', year)
+    db.byYear('urssaf', year),
+    db.byYear('documents', year)
   ]);
 
   // Frais réels sur justificatifs.
@@ -820,7 +885,7 @@ async function computeYear(year) {
   const revenueGap = fromUrssaf && revenues.length ? declaredTotal - invoicedTotal : 0;
 
   const result = {
-    year, expenses, trips, payslips, revenues, declarations,
+    year, expenses, trips, payslips, revenues, declarations, documents,
     expensesDeductible: deductible,
     deductible: totalDeductible,
     courrierOn, courrier, courrierNet, courrierDeduction, method, useBrute,
@@ -835,13 +900,15 @@ async function computeYear(year) {
     fromUrssaf, cotisations, cfp, vflPaid, invoicedTotal, revenueGap
   };
 
+  result.coverage = coverageGaps(year, payslips, declarations, documents);
+  result.closure = yearClosure(year);
   result.tax = estimateTax(result);
   return result;
 }
 
 /** Années présentes dans la base, plus l'année courante. */
 async function knownYears() {
-  const sets = await Promise.all(['expenses', 'trips', 'payslips', 'revenues', 'urssaf'].map(s => db.all(s)));
+  const sets = await Promise.all(['expenses', 'trips', 'payslips', 'revenues', 'urssaf', 'documents'].map(s => db.all(s)));
   const years = new Set(sets.flat().map(r => r.year).filter(Boolean));
   years.add(new Date().getFullYear());
   return [...years].sort((a, b) => b - a);

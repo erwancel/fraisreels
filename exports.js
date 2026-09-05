@@ -569,10 +569,12 @@ async function buildZip(data, onProgress) {
     }
   }
 
-  // Justificatifs des revenus, dans un dossier séparé
+  // Pièces des revenus et documents de référence, chacun dans son dossier
   for (const list of [
     { rows: data.payslips, dir: 'bulletins', key: p => `${p.month}_${slug(p.employer)}` },
-    { rows: data.revenues, dir: 'factures', key: r => `${r.date}_${slug(r.invoice || r.client)}` }
+    { rows: data.revenues, dir: 'factures', key: r => `${r.date}_${slug(r.invoice || r.client)}` },
+    { rows: data.declarations, dir: 'urssaf', key: d => `${d.month}_declaration` },
+    { rows: data.documents, dir: 'plannings', key: d => `${d.period}_${slug(d.kind)}` }
   ]) {
     for (const row of list.rows) {
       for (const rid of row.receiptIds || []) {
@@ -616,6 +618,8 @@ async function buildBackup(onProgress) {
     payslips: await db.all('payslips'),
     revenues: await db.all('revenues'),
     urssaf:   await db.all('urssaf'),
+    documents: await db.all('documents'),
+    recurring: await db.all('recurring'),
     settings: await db.all('settings'),
     receipts: []
   };
@@ -642,7 +646,7 @@ async function restoreBackup(file, mode = 'replace') {
 
   if (mode === 'replace') await db.wipeAll();
 
-  for (const key of ['expenses', 'trips', 'payslips', 'revenues', 'urssaf']) {
+  for (const key of ['expenses', 'trips', 'payslips', 'revenues', 'urssaf', 'documents', 'recurring']) {
     for (const row of payload[key] || []) await db.put(key, row);
   }
   for (const r of payload.receipts || []) {

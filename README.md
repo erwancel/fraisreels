@@ -223,6 +223,33 @@ Les recettes Air One Aero se ventilent par catégorie fiscale.
 
 ---
 
+## Suivi de la couverture
+
+L'accueil signale les mois échus pour lesquels une pièce manque : bulletin, déclaration Urssaf ou
+planning. Le contrôle ne porte que sur l'intervalle réellement concerné, du premier mois documenté
+au dernier mois échu — une activité démarrée en juin ne fait pas apparaître cinq mois manquants
+qui n'ont jamais eu lieu d'exister.
+
+Les PDF importés sont conservés comme justificatifs : le bulletin est attaché à son mois, la
+déclaration à la sienne, et le planning archivé sous sa période. Ce sont ces pièces qu'un contrôle
+demandera. L'archive annuelle les range dans `bulletins/`, `urssaf/` et `plannings/`.
+
+## Clôturer une année
+
+Une fois la déclaration envoyée, l'écran Bilan permet de noter ce qui a réellement été déclaré.
+Les écarts avec l'estimation restent affichés, ce qui permet de la calibrer pour l'année suivante.
+Une année close est signalée sur l'accueil et toute modification de ses données demande
+confirmation. Elle peut être rouverte à tout moment.
+
+## Dépenses récurrentes
+
+Loyer, abonnement, part professionnelle du téléphone : un modèle décrit le montant mensuel, le
+poste, la quote-part et la période, puis génère les échéances **sur demande**, jamais
+automatiquement et jamais deux fois pour le même mois. Le compteur des échéances en attente
+s'affiche dans l'écran Dépenses. Chaque ligne créée reste à justifier individuellement.
+
+Supprimer un modèle ne supprime pas les dépenses déjà générées.
+
 ## Supprimer plusieurs entrées
 
 Chaque liste porteuse de données — dépenses, séjours, bulletins, recettes, déclarations Urssaf —
