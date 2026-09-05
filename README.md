@@ -190,6 +190,21 @@ Les recettes Air One Aero se ventilent par catégorie fiscale.
 
 ---
 
+## Supprimer plusieurs entrées
+
+Chaque liste porteuse de données — dépenses, séjours, bulletins, recettes, déclarations Urssaf —
+a un bouton **Modifier** dans son en-tête. Il fait apparaître une case devant chaque ligne et une
+barre d'actions en bas de l'écran, avec le nombre d'éléments cochés, un bouton pour tout
+sélectionner d'un coup et la suppression.
+
+Pendant la sélection, appuyer sur une ligne la coche au lieu de l'ouvrir. La suppression demande
+confirmation et efface aussi les justificatifs attachés. Changer d'onglet quitte le mode et
+abandonne la sélection.
+
+Le filtre et la recherche restent actifs en mode sélection : « Tout » ne coche que les lignes
+effectivement affichées, ce qui permet par exemple de supprimer d'un coup toutes les dépenses
+d'un poste donné.
+
 ## Export annuel
 
 **Bilan → Dossier complet (ZIP)** produit :

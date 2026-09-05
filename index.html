@@ -104,6 +104,10 @@
         </div>
         <div class="filters" id="expense-filters"></div>
         <div class="panel">
+          <div class="panel-head">
+            <h2>Journal des dépenses</h2>
+            <button type="button" class="btn btn-ghost" data-edit="expenses" style="padding:7px 12px;min-height:34px;font-size:.8rem">Modifier</button>
+          </div>
           <div class="log" id="expense-list"></div>
         </div>
       </section>
@@ -126,7 +130,10 @@
           <div id="trip-summary"></div>
         </div>
         <div class="panel">
-          <div class="panel-head"><h2>Journal des séjours</h2></div>
+          <div class="panel-head">
+            <h2>Journal des séjours</h2>
+            <button type="button" class="btn btn-ghost" data-edit="trips" style="padding:7px 12px;min-height:34px;font-size:.8rem">Modifier</button>
+          </div>
           <div class="log" id="trip-list"></div>
         </div>
       </section>
@@ -136,7 +143,10 @@
         <div class="panel">
           <div class="panel-head">
             <h2>Salaire</h2>
-            <button type="button" class="btn btn-ghost" id="add-payslip" style="padding:7px 12px;min-height:34px;font-size:.8rem">Saisir à la main</button>
+            <span style="display:flex;gap:6px">
+              <button type="button" class="btn btn-ghost" id="add-payslip" style="padding:7px 12px;min-height:34px;font-size:.8rem">Saisir</button>
+              <button type="button" class="btn btn-ghost" data-edit="payslips" style="padding:7px 12px;min-height:34px;font-size:.8rem">Modifier</button>
+            </span>
           </div>
           <div class="btn-row" style="margin-bottom:12px">
             <label class="btn btn-primary btn-block" for="payslip-file" style="cursor:pointer">Importer un bulletin PDF</label>
@@ -149,13 +159,20 @@
         <div class="panel">
           <div class="panel-head">
             <h2>Chiffre d'affaires Air One Aero</h2>
-            <button type="button" class="btn btn-ghost" id="add-revenue" style="padding:7px 12px;min-height:34px;font-size:.8rem">Ajouter une recette</button>
+            <span style="display:flex;gap:6px">
+              <button type="button" class="btn btn-ghost" id="add-revenue" style="padding:7px 12px;min-height:34px;font-size:.8rem">Ajouter</button>
+              <button type="button" class="btn btn-ghost" data-edit="revenues" style="padding:7px 12px;min-height:34px;font-size:.8rem">Modifier</button>
+            </span>
           </div>
           <div class="btn-row" style="margin-bottom:12px">
             <label class="btn btn-primary btn-block" for="urssaf-file" style="cursor:pointer">Importer une déclaration Urssaf</label>
             <input type="file" id="urssaf-file" accept="application/pdf" multiple hidden>
           </div>
           <div id="urssaf-summary"></div>
+          <div class="panel-head" id="urssaf-head" hidden style="margin-top:4px">
+            <h3 style="margin:0">Déclarations enregistrées</h3>
+            <button type="button" class="btn btn-ghost" data-edit="urssaf" style="padding:7px 12px;min-height:34px;font-size:.8rem">Modifier</button>
+          </div>
           <div class="log" id="urssaf-list"></div>
           <div id="revenue-totals"></div>
           <div class="log" id="revenue-list"></div>
@@ -229,6 +246,13 @@
 </div>
 
 <button type="button" class="fab" id="quick-add" aria-label="Ajouter une dépense">+</button>
+<div class="bulkbar" id="bulkbar" hidden>
+  <button type="button" class="btn btn-ghost" id="bulk-all">Tout</button>
+  <span class="count" id="bulk-count"></span>
+  <button type="button" class="btn btn-danger" id="bulk-delete">Supprimer</button>
+  <button type="button" class="btn" id="bulk-done">Terminé</button>
+</div>
+
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <!-- ============ Feuille : dépense ============ -->

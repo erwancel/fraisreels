@@ -14,7 +14,9 @@ const state = {
   sheetIsNew: false,
   sheetReceipts: [],    // pièces attachées dans la feuille ouverte
   filter: 'all',
-  search: ''
+  search: '',
+  editList: null,          // liste en cours d'édition
+  selected: new Set()      // identifiants cochés
 };
 
 const VIEW_TITLES = {
@@ -54,16 +56,123 @@ async function refresh() {
     trips: renderTrips, income: renderIncome, report: renderReport
   };
   renderers[state.view]?.();
+
+  // Les libellés des boutons et la barre reflètent l'état courant
+  $$('[data-edit]').forEach(b => {
+    b.textContent = state.editList === b.dataset.edit ? 'Terminé' : 'Modifier';
+  });
+  renderBulkBar();
 }
 
 function switchView(view) {
+  // Quitter une vue abandonne la sélection en cours
+  state.editList = null;
+  state.selected = new Set();
   state.view = view;
   $$('.tabbar button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.view === view)));
   $$('.view').forEach(v => { v.hidden = v.id !== 'view-' + view; });
   $('#view-title').textContent = VIEW_TITLES[view];
   $('#quick-add').hidden = (view === 'report' || view === 'income');
+  $('#bulkbar').hidden = true;
   window.scrollTo(0, 0);
   refresh();
+}
+
+/* ===========================================================
+   Sélection multiple
+   =========================================================== */
+
+// Chaque liste sélectionnable, avec son magasin et l'attribut porté par ses lignes
+const LISTS = {
+  expenses: { store: 'expenses', attr: 'expense', one: 'dépense',     many: 'dépenses' },
+  trips:    { store: 'trips',    attr: 'trip',    one: 'séjour',      many: 'séjours' },
+  payslips: { store: 'payslips', attr: 'payslip', one: 'bulletin',    many: 'bulletins' },
+  revenues: { store: 'revenues', attr: 'revenue', one: 'recette',     many: 'recettes' },
+  urssaf:   { store: 'urssaf',   attr: 'urssaf',  one: 'déclaration', many: 'déclarations' }
+};
+
+/** Case de sélection, présente uniquement quand la liste est en cours d'édition. */
+const pickMark = (list) => state.editList === list ? '<span class="pick"></span>' : '';
+
+/** Attribut d'état, pour que la ligne reflète sa sélection. */
+const pickState = (list, id) =>
+  state.editList === list ? ` aria-pressed="${state.selected.has(id) ? 'true' : 'false'}"` : '';
+
+function enterEditMode(list) {
+  state.editList = list;
+  state.selected = new Set();
+  refresh();
+}
+
+function exitEditMode() {
+  state.editList = null;
+  state.selected = new Set();
+  refresh();
+}
+
+function toggleSelection(id) {
+  if (state.selected.has(id)) state.selected.delete(id);
+  else state.selected.add(id);
+  renderBulkBar();
+  // Mise à jour de la seule ligne concernée, sans reconstruire toute la vue
+  const cfg = LISTS[state.editList];
+  const row = document.querySelector(`[data-${cfg.attr}="${CSS.escape(id)}"]`);
+  if (row) row.setAttribute('aria-pressed', state.selected.has(id) ? 'true' : 'false');
+}
+
+/** Identifiants actuellement affichés dans la liste en édition. */
+function visibleIds() {
+  const cfg = LISTS[state.editList];
+  if (!cfg) return [];
+  return $$(`[data-${cfg.attr}]`).map(el => el.dataset[cfg.attr]);
+}
+
+function renderBulkBar() {
+  const bar = $('#bulkbar');
+  if (!state.editList) { bar.hidden = true; return; }
+
+  const cfg = LISTS[state.editList];
+  const n = state.selected.size;
+  const total = visibleIds().length;
+
+  bar.hidden = false;
+  $('#bulk-count').textContent = n
+    ? `${n} ${n > 1 ? cfg.many : cfg.one} sur ${total}`
+    : `Sélectionne des ${cfg.many}`;
+  $('#bulk-delete').disabled = n === 0;
+  $('#bulk-all').textContent = n === total && total > 0 ? 'Aucun' : 'Tout';
+}
+
+function toggleSelectAll() {
+  const ids = visibleIds();
+  if (state.selected.size === ids.length) state.selected.clear();
+  else ids.forEach(id => state.selected.add(id));
+  refresh();
+}
+
+async function deleteSelection() {
+  const cfg = LISTS[state.editList];
+  const ids = [...state.selected];
+  if (!ids.length) return;
+
+  const label = ids.length > 1 ? `ces ${ids.length} ${cfg.many}` : `cette ${cfg.one}`;
+  if (!confirm(`Supprimer ${label} ? Les justificatifs associés seront effacés aussi.`)) return;
+
+  let receipts = 0;
+  for (const id of ids) {
+    const record = await db.get(cfg.store, id);
+    for (const rid of record?.receiptIds || []) {
+      await db.remove('receipts', rid);
+      receipts++;
+    }
+    await db.remove(cfg.store, id);
+  }
+
+  const count = ids.length;
+  exitEditMode();
+  await rebuildYears();
+  await refresh();
+  toast(`${count} ${count > 1 ? cfg.many : cfg.one} supprimé${count > 1 ? 's' : ''}${receipts ? `, ${receipts} justificatif${receipts > 1 ? 's' : ''}` : ''}.`);
 }
 
 /* ===========================================================
@@ -224,7 +333,7 @@ function renderBackupWarning() {
    Vue : dépenses
    =========================================================== */
 
-function expenseRow(e) {
+function expenseRow(e, list = null) {
   const { day, month } = dayMonth(e.date);
   const cat = CAT_BY_ID[e.category]?.label || e.category;
   const country = COUNTRY_BY_CODE[e.country];
@@ -239,7 +348,8 @@ function expenseRow(e) {
   ].filter(Boolean).join('<span class="dot"></span>');
 
   return `
-    <button type="button" class="log-row" data-expense="${e.id}">
+    <button type="button" class="log-row" data-expense="${e.id}"${pickState(list, e.id)}>
+      ${pickMark(list)}
       <span class="log-date"><b>${day}</b>${month}</span>
       <span class="log-main">
         <span class="log-label">${escapeHtml(e.label || cat)}</span>
@@ -282,8 +392,9 @@ function renderExpenses() {
   list.sort((a, b) => b.date.localeCompare(a.date));
   const total = list.reduce((s, e) => s + toEur(e.amount, e.currency), 0);
 
+  $('#expense-list').classList.toggle('is-editing', state.editList === 'expenses');
   $('#expense-list').innerHTML = list.length
-    ? list.map(expenseRow).join('') +
+    ? list.map(e => expenseRow(e, 'expenses')).join('') +
       `<div class="log-total"><span>${list.length} ligne${list.length > 1 ? 's' : ''}</span><span class="money">${eur(total)}</span></div>`
     : `<div class="empty"><strong>Aucune dépense</strong>${state.search || state.filter !== 'all' ? 'Aucun résultat pour ce filtre.' : 'Appuie sur + pour commencer.'}</div>`;
 }
@@ -344,7 +455,8 @@ function renderTrips() {
     const a = tripAllowance(t);
 
     rows.push(`
-      <button type="button" class="log-row" data-trip="${t.id}">
+      <button type="button" class="log-row" data-trip="${t.id}"${pickState('trips', t.id)}>
+        ${pickMark('trips')}
         <span class="log-date"><b>${day}</b>${month}</span>
         <span class="log-main">
           <span class="log-label">${escapeHtml(COUNTRY_BY_CODE[t.country] || t.country)}</span>
@@ -355,6 +467,7 @@ function renderTrips() {
   }
   if (currentMonth) rows.push(monthFooter(d, currentMonth));
 
+  $('#trip-list').classList.toggle('is-editing', state.editList === 'trips');
   $('#trip-list').innerHTML = rows.length
     ? rows.join('')
     : `<div class="empty"><strong>Aucun séjour</strong>Importe ton roster ou ajoute tes rotations à la main.</div>`;
@@ -389,6 +502,7 @@ function renderIncome() {
 
   const SOURCES = { CZ: 'Tchéquie', MT: 'Malte', DE: 'Allemagne', AT: 'Autriche', FR: 'France', AUTRE: 'Autre' };
   const slips = [...d.payslips].sort((a, b) => (b.month || '').localeCompare(a.month || ''));
+  $('#payslip-list').classList.toggle('is-editing', state.editList === 'payslips');
   $('#payslip-list').innerHTML = slips.length ? slips.map(p => {
     const [y, m] = (p.month || '').split('-');
     const months = ['janv', 'févr', 'mars', 'avril', 'mai', 'juin', 'juil', 'août', 'sept', 'oct', 'nov', 'déc'];
@@ -396,7 +510,8 @@ function renderIncome() {
     const bal = payslipBalance(p);
     const foreign = p.currency && p.currency !== 'EUR';
     return `
-      <button type="button" class="log-row" data-payslip="${p.id}">
+      <button type="button" class="log-row" data-payslip="${p.id}"${pickState('payslips', p.id)}>
+        ${pickMark('payslips')}
         <span class="log-date"><b>${months[Number(m) - 1] || '?'}</b>${y || ''}</span>
         <span class="log-main">
           <span class="log-label">${escapeHtml(p.employer || 'Bulletin')}</span>
@@ -427,10 +542,13 @@ function renderIncome() {
       ${d.revenueGap > 0 ? 'Des recettes manquent dans l\'application.' : 'Des recettes saisies ne figurent pas dans les déclarations.'}
     </div>` : ''}` : '';
 
+  $('#urssaf-head').hidden = decls.length === 0;
+  $('#urssaf-list').classList.toggle('is-editing', state.editList === 'urssaf');
   $('#urssaf-list').innerHTML = decls.length ? decls.map(x => {
     const rate = x.totalCa > 0 ? (x.totalDue / x.totalCa) * 100 : 0;
     return `
-      <div class="log-row" style="cursor:default">
+      <div class="log-row" data-urssaf="${x.id}"${pickState('urssaf', x.id)} style="cursor:${state.editList === 'urssaf' ? 'pointer' : 'default'}">
+        ${pickMark('urssaf')}
         <span class="log-date"><b>${MONTH_LABELS[Number(x.month.slice(5, 7)) - 1]?.slice(0, 4) || '?'}</b>${x.month.slice(0, 4)}</span>
         <span class="log-main">
           <span class="log-label">${eur(x.totalCa)} déclarés</span>
@@ -455,10 +573,12 @@ function renderIncome() {
     : '';
 
   const revs = [...d.revenues].sort((a, b) => b.date.localeCompare(a.date));
+  $('#revenue-list').classList.toggle('is-editing', state.editList === 'revenues');
   $('#revenue-list').innerHTML = revs.length ? revs.map(r => {
     const { day, month } = dayMonth(r.date);
     return `
-      <button type="button" class="log-row" data-revenue="${r.id}">
+      <button type="button" class="log-row" data-revenue="${r.id}"${pickState('revenues', r.id)}>
+        ${pickMark('revenues')}
         <span class="log-date"><b>${day}</b>${month}</span>
         <span class="log-main">
           <span class="log-label">${escapeHtml(r.client || 'Recette')}</span>
@@ -1523,15 +1643,37 @@ function bindEvents() {
   $('#add-payslip').addEventListener('click', () => openPayslip(null));
   $('#add-revenue').addEventListener('click', () => openRevenue(null));
 
-  // Ouverture d'une ligne
+  // Ouverture d'une ligne, ou sélection lorsque la liste est en édition
   document.addEventListener('click', async (e) => {
-    const row = e.target.closest('[data-expense],[data-trip],[data-payslip],[data-revenue]');
+    const row = e.target.closest('[data-expense],[data-trip],[data-payslip],[data-revenue],[data-urssaf]');
     if (!row) return;
+
+    if (state.editList) {
+      const cfg = LISTS[state.editList];
+      const id = row.dataset[cfg.attr];
+      // Un clic sur une autre liste que celle en édition est sans effet
+      if (id) toggleSelection(id);
+      return;
+    }
+
     if (row.dataset.expense) openExpense(await db.get('expenses', row.dataset.expense));
     else if (row.dataset.trip) openTrip(await db.get('trips', row.dataset.trip));
     else if (row.dataset.payslip) openPayslip(await db.get('payslips', row.dataset.payslip));
     else if (row.dataset.revenue) openRevenue(await db.get('revenues', row.dataset.revenue));
   });
+
+  // Entrée en mode édition
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-edit]');
+    if (!btn) return;
+    const list = btn.dataset.edit;
+    if (state.editList === list) exitEditMode();
+    else enterEditMode(list);
+  });
+
+  $('#bulk-all').addEventListener('click', toggleSelectAll);
+  $('#bulk-delete').addEventListener('click', deleteSelection);
+  $('#bulk-done').addEventListener('click', exitEditMode);
 
   // Filtres et recherche
   $('#expense-filters').addEventListener('click', e => {
