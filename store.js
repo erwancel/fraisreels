@@ -231,7 +231,11 @@ const SETTINGS_DEFAULTS = {
     method: 'brute',      // 'brute' : per diem réintégré en 1AJ, forfait entier en 1AK
                           // 'nette' : 1AK = forfait moins per diem reçu
     halfReturn: true,     // demi-indemnité le jour du retour en base
-    lodgedRate: 100,      // part de l'indemnité retenue quand l'hôtel est payé par la compagnie
+    // Une indemnité journalière de mission à l'étranger se ventile en 65 % pour
+    // l'hébergement et 35 % pour la restauration (deux repas à 17,5 %).
+    // Arrêté du 3 juillet 2006, article 3 : logé gratuitement, le taux est
+    // réduit de 65 %. Il reste donc la part repas, soit 35 %.
+    lodgedRate: 35,       // part retenue quand l'hôtel est payé par la compagnie
     rates: {
       DEFAUT: 174,        // zone euro et Schengen, moyen-courrier
       GB: 207, CH: 248, NO: 222, SE: 196, DK: 228,
@@ -580,6 +584,11 @@ async function computeYear(year) {
   const declaredSalary = useBrute ? taxableSalary + allowances : taxableSalary;
   const courrierDeduction = courrierOn ? (useBrute ? courrier.gross : courrierNet) : 0;
 
+  // Quand la compagnie verse plus que le barème ne permet de déduire, opter pour
+  // le forfait coûte plus qu'il ne rapporte : la réintégration dépasse la déduction.
+  const courrierUnfavourable = courrierOn && courrier.gross > 0 && allowances > courrier.gross;
+  const courrierLoss = courrierUnfavourable ? allowances - courrier.gross : 0;
+
   const totalDeductible = deductible + courrierDeduction;
 
   // Abattement de 10 % vs frais réels
@@ -635,6 +644,7 @@ async function computeYear(year) {
     expensesDeductible: deductible,
     deductible: totalDeductible,
     courrierOn, courrier, courrierNet, courrierDeduction, method, useBrute,
+    courrierUnfavourable, courrierLoss,
     supersededByForfait,
     reimbursed, aoaSpend, missingProof, categories,
     taxableSalary, declaredSalary, allowances, grossSalary, socialPaid,

@@ -229,11 +229,16 @@ zone euro et Schengen.
 
 Quatre garde-fous sont intégrés :
 
-- **Hébergement fourni.** Le barème couvre les repas *et* l'hébergement. Quand l'hôtel est réservé
-  et réglé par la compagnie, la part logement n'est pas une dépense supportée. Chaque séjour porte
-  un indicateur « hôtel payé par la compagnie », coché par défaut à l'import puisque les hôtels du
-  roster sont des réservations employeur, et la part d'indemnité retenue dans ce cas se règle en
-  pourcentage. À 100 %, tout est déduit, ce qui est difficile à défendre si tu ne paies pas l'hôtel.
+- **Hébergement fourni.** Une indemnité journalière de mission à l'étranger se ventile en 65 %
+  pour l'hébergement et 35 % pour la restauration, soit deux repas à 17,5 %. L'arrêté du
+  3 juillet 2006, article 3, prévoit une réduction de 65 % lorsque l'agent est logé gratuitement.
+  Chaque séjour porte donc un indicateur « hôtel payé par la compagnie », coché par défaut à
+  l'import puisque les hôtels du roster sont des réservations employeur, et la part retenue est
+  fixée à 35 %. **Le prix réel de l'hôtel n'a pas à être connu** : le barème est forfaitaire et sa
+  ventilation est réglementaire.
+
+- **Per diem supérieur au forfait.** Si la compagnie verse plus que le barème ne permet de déduire,
+  opter pour le forfait fait réintégrer plus qu'il ne fait déduire. Le tableau de bord le signale.
 
 - **Pas de double déduction.** Quand le forfait est actif, les dépenses de repas, hébergement et
   transports en escale cessent d'être comptées séparément. Le montant écarté reste affiché.
@@ -243,6 +248,10 @@ Quatre garde-fous sont intégrés :
 - **Séjours non éligibles écartés.** La présence en base d'affectation relève de la double
   résidence, pas de l'escale, et les missions Air One Aero ne sont pas du salariat. Ces séjours
   sont exclus du calcul.
+
+Les justificatifs à conserver sont le roster, qui prouve les dates et les lieux de découché, les
+bulletins, qui prouvent le per diem reçu, et le barème de l'année. Aucune facture d'hôtel n'est
+requise pour la part forfaitaire.
 
 Le tableau de bord signale par ailleurs tout total de frais dépassant 55 % du salaire déclaré.
 Une déclaration de cet ordre attire l'attention et doit pouvoir être justifiée ligne par ligne.

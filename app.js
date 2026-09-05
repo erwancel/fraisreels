@@ -200,6 +200,14 @@ function renderBackupWarning() {
     </div>`);
   }
 
+  if (d.courrierUnfavourable) {
+    blocks.push(`<div class="notice alert">
+      Le per diem versé par ta compagnie (${eur(d.allowances)}) dépasse le forfait d'escale
+      déductible (${eur(d.courrier.gross)}). Opter pour le forfait te ferait réintégrer
+      ${eur(d.courrierLoss)} de plus que tu ne peux déduire.
+    </div>`);
+  }
+
   const last = settings.lastBackup;
   const age = last ? (Date.now() - new Date(last).getTime()) / 86400000 : Infinity;
   if (d.expenses.length && age > 30) {
