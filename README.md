@@ -263,6 +263,11 @@ frais-reels-2026/
 Chaque justificatif porte un numéro de pièce qui correspond à la colonne « Pièce » du journal PDF.
 Le dossier se transmet tel quel à un comptable.
 
+Le PDF enchaîne les sections sans saut de page inutile et omet les tableaux vides. Tout le texte
+qui y entre passe par un nettoyage : les polices standard de jsPDF se limitent au jeu Latin-1,
+et le séparateur de milliers du format français est une espace insécable étroite qui n'en fait
+pas partie — sans traitement, « 11 467,68 € » s'imprime « 11 /467,68 € ».
+
 ---
 
 ## Frais en courrier

@@ -175,6 +175,42 @@ function payslipsCsv(data) {
 
 /* ---------- PDF récapitulatif ---------- */
 
+/**
+ * Nettoie le texte destiné au PDF.
+ *
+ * Les polices standard de jsPDF sont limitées au jeu Latin-1. Le format
+ * français produit une espace insécable étroite comme séparateur de milliers,
+ * absente de ce jeu : elle est alors rendue par un glyphe arbitraire, et
+ * « 11 467,68 € » s'affiche « 11 /467,68 € ».
+ */
+function pdfSafe(value) {
+  return String(value ?? '')
+    .replace(/[\u202F\u2009\u00A0]/g, ' ')
+    .replace(/[\u2010-\u2015]/g, '-')
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/\u2026/g, '...');
+  // Le symbole euro figure bien dans WinAnsi : inutile de le remplacer.
+}
+
+const pEur  = (n) => pdfSafe(eur(n));
+const pEur0 = (n) => pdfSafe(eur0(n));
+const pNum  = (n, d) => pdfSafe(num(n, d));
+
+/** Options communes à tous les tableaux, avec nettoyage systématique. */
+const tableBase = {
+  theme: 'grid',
+  styles: { fontSize: 8.6, cellPadding: 2.4, lineColor: [222, 226, 232], lineWidth: 0.15,
+            textColor: [28, 32, 38] },
+  headStyles: { fillColor: [38, 48, 62], textColor: 255, fontSize: 8.4, fontStyle: 'bold',
+                cellPadding: 2.6 },
+  alternateRowStyles: { fillColor: [248, 249, 251] },
+  footStyles: { fillColor: [236, 238, 242], textColor: [20, 24, 30], fontStyle: 'bold' },
+  didParseCell: (d) => {
+    if (Array.isArray(d.cell.text)) d.cell.text = d.cell.text.map(pdfSafe);
+  }
+};
+
 async function buildPdf(data) {
   await ensurePdf();
   const { jsPDF } = window.jspdf;
@@ -182,198 +218,199 @@ async function buildPdf(data) {
 
   const M = 15;
   const W = doc.internal.pageSize.getWidth();
+  const H = doc.internal.pageSize.getHeight();
   const owner = settings.name || '';
   let y = M;
 
+  /** Réserve la place nécessaire, en changeant de page seulement si besoin. */
+  const need = (mm) => { if (y + mm > H - 20) { doc.addPage(); y = M; } };
+
   const heading = (text) => {
-    doc.setFont('helvetica', 'bold').setFontSize(11).setTextColor(20, 20, 20);
-    doc.text(text, M, y);
-    y += 2;
-    doc.setDrawColor(180).setLineWidth(0.3).line(M, y, W - M, y);
-    y += 6;
+    need(18);
+    doc.setFont('helvetica', 'bold').setFontSize(10.5).setTextColor(24, 30, 38);
+    doc.text(pdfSafe(text), M, y);
+    y += 1.8;
+    doc.setDrawColor(196, 202, 210).setLineWidth(0.4).line(M, y, W - M, y);
+    y += 5.5;
   };
 
-  // En-tête
-  doc.setFont('helvetica', 'bold').setFontSize(17).setTextColor(20, 20, 20);
-  doc.text(`Frais réels ${data.year}`, M, y);
-  y += 7;
-  doc.setFont('helvetica', 'normal').setFontSize(9.5).setTextColor(110);
+  const note = (text) => {
+    doc.setFont('helvetica', 'italic').setFontSize(7.6).setTextColor(120, 126, 134);
+    const lines = doc.splitTextToSize(pdfSafe(text), W - 2 * M);
+    doc.text(lines, M, y);
+    y += lines.length * 3.4;
+  };
+
+  const table = (options) => {
+    doc.autoTable({ ...tableBase, ...options, startY: y, margin: { left: M, right: M } });
+    y = doc.lastAutoTable.finalY + 7;
+  };
+
+  // ---------- En-tête ----------
+  doc.setFont('helvetica', 'bold').setFontSize(16).setTextColor(20, 26, 34);
+  doc.text(pdfSafe(`Frais reels ${data.year}`), M, y);
+  y += 6.5;
+  doc.setFont('helvetica', 'normal').setFontSize(9).setTextColor(110, 116, 124);
   const sub = [owner, settings.home && `Domicile : ${settings.home}`, settings.base && `Base : ${settings.base}`]
-    .filter(Boolean).join('   ·   ');
-  if (sub) { doc.text(sub, M, y); y += 5; }
-  doc.text(`Document établi le ${new Date().toLocaleDateString('fr-FR')}`, M, y);
-  y += 11;
+    .filter(Boolean).join('   -   ');
+  if (sub) { doc.text(pdfSafe(sub), M, y); y += 4.2; }
+  doc.text(pdfSafe(`Document etabli le ${new Date().toLocaleDateString('fr-FR')}`), M, y);
+  y += 9;
 
-  // Synthèse
-  heading('Synthèse');
-  doc.autoTable({
-    startY: y,
-    margin: { left: M, right: M },
+  // ---------- Synthèse ----------
+  heading('Synthese');
+  const synth = [
+    ['Salaire net imposable declare', pEur(data.declaredSalary)],
+    [`Abattement forfaitaire de 10 % (plancher ${pEur0(data.abatementBounds.min)}, plafond ${pEur0(data.abatementBounds.max)})`,
+     pEur(data.abatement)]
+  ];
+  if (data.courrierDeduction) {
+    synth.push([`Frais en courrier - ${data.courrier.nights} nuits d'escale`, pEur(data.courrierDeduction)]);
+    synth.push(['Autres frais sur justificatifs', pEur(data.expensesDeductible)]);
+  }
+  synth.push(['Total des frais reels', pEur(data.deductible)]);
+  synth.push([
+    data.advantage >= 0 ? 'Gain de base imposable en optant pour le reel' : "Ecart en faveur de l'abattement",
+    pEur(Math.abs(data.advantage))
+  ]);
+
+  table({
     theme: 'plain',
-    styles: { fontSize: 9.5, cellPadding: { top: 2, bottom: 2, left: 0, right: 0 } },
-    columnStyles: { 0: { cellWidth: 110 }, 1: { halign: 'right', fontStyle: 'bold' } },
-    body: [
-      ['Salaire net imposable déclaré', eur(data.declaredSalary)],
-      [`Abattement forfaitaire de 10 % (plancher ${eur0(data.abatementBounds.min)}, plafond ${eur0(data.abatementBounds.max)})`, eur(data.abatement)],
-      ...(data.courrierDeduction
-        ? [[`Frais en courrier — ${data.courrier.nights} nuits d'escale`, eur(data.courrierDeduction)],
-           ['Autres frais sur justificatifs', eur(data.expensesDeductible)]]
-        : []),
-      ['Total des frais réels', eur(data.deductible)],
-      [data.advantage >= 0 ? 'Gain de base imposable en optant pour le réel' : 'Écart en faveur de l\'abattement', eur(Math.abs(data.advantage))]
-    ]
+    styles: { ...tableBase.styles, cellPadding: { top: 1.7, bottom: 1.7, left: 0, right: 0 } },
+    columnStyles: { 0: { cellWidth: 118 }, 1: { halign: 'right', fontStyle: 'bold' } },
+    body: synth
   });
-  y = doc.lastAutoTable.finalY + 10;
 
-  // Salaire de source étrangère
+  // ---------- Salaire de source étrangère ----------
   if (data.foreignSalary > 0) {
-    heading('Salaire de source étrangère');
-    doc.autoTable({
-      startY: y,
-      margin: { left: M, right: M },
+    heading('Salaire de source etrangere');
+    table({
       theme: 'plain',
-      styles: { fontSize: 9.5, cellPadding: { top: 2, bottom: 2, left: 0, right: 0 } },
-      columnStyles: { 0: { cellWidth: 110 }, 1: { halign: 'right', fontStyle: 'bold' } },
+      styles: { ...tableBase.styles, cellPadding: { top: 1.7, bottom: 1.7, left: 0, right: 0 } },
+      columnStyles: { 0: { cellWidth: 118 }, 1: { halign: 'right', fontStyle: 'bold' } },
       body: [
-        ['Base imposable locale, convertie en euros', eur(data.grossSalary)],
-        ['Cotisations sociales salariales obligatoires', eur(data.socialPaid)],
-        ['Base retenue pour la déclaration française', eur(data.taxableSalary)],
-        ['Indemnités de déplacement non imposables localement', eur(data.allowances)],
-        ['Impôt effectivement payé à l\'étranger', eur(data.foreignTax)]
+        ['Base imposable locale, convertie en euros', pEur(data.grossSalary)],
+        ['Cotisations sociales salariales obligatoires', pEur(data.socialPaid)],
+        ['Base retenue pour la declaration francaise', pEur(data.taxableSalary)],
+        ['Indemnites de deplacement non imposables localement', pEur(data.allowances)],
+        ["Impot effectivement paye a l'etranger", pEur(data.foreignTax)]
       ]
     });
-    y = doc.lastAutoTable.finalY + 4;
-    doc.setFont('helvetica', 'italic').setFontSize(8).setTextColor(130);
-    doc.text(
-      'Conversion au taux porté par chaque bulletin. Traitement conventionnel a confirmer.',
-      M, y
-    );
-    y += 10;
+    y -= 3;
+    note("Conversion au taux porte par chaque bulletin. Traitement conventionnel a confirmer.");
+    y += 5;
   }
 
-  // Détail par poste
-  heading('Détail par poste de dépense');
-  doc.autoTable({
-    startY: y,
-    margin: { left: M, right: M },
-    theme: 'striped',
-    headStyles: { fillColor: [38, 48, 62], textColor: 255, fontSize: 9 },
-    styles: { fontSize: 9, cellPadding: 2.2 },
-    columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' } },
-    head: [['Poste', 'Nombre', 'Montant']],
-    body: (data.courrierDeduction
-      ? [[`Frais en courrier (${data.courrier.nights} nuits)`, String(data.courrier.counted), eur(data.courrierDeduction)]]
-      : []
-    ).concat(data.categories.map(c => {
-      const count = data.expenses.filter(e =>
-        e.category === c.id && e.attach !== 'aoa' && !e.reimbursed).length;
-      return [c.label, String(count), eur(c.total)];
-    })),
-    foot: [['Total', '', eur(data.deductible)]],
-    footStyles: { fillColor: [240, 240, 240], textColor: 20, fontStyle: 'bold', halign: 'right' }
-  });
-  y = doc.lastAutoTable.finalY + 10;
+  // ---------- Détail par poste ----------
+  const posteRows = [];
+  if (data.courrierDeduction) {
+    posteRows.push([
+      `Frais en courrier (${data.courrier.nights} nuits)`,
+      `${data.courrier.counted} sejours`,
+      pEur(data.courrierDeduction)
+    ]);
+  }
+  for (const c of data.categories) {
+    const count = data.expenses.filter(e =>
+      e.category === c.id && e.attach !== 'aoa' && !e.reimbursed).length;
+    posteRows.push([c.label, String(count), pEur(c.total)]);
+  }
 
-  // Présence par pays
+  if (posteRows.length) {
+    heading('Detail par poste de depense');
+    table({
+      columnStyles: { 1: { halign: 'right', cellWidth: 28 }, 2: { halign: 'right', cellWidth: 32 } },
+      head: [['Poste', 'Nombre', 'Montant']],
+      body: posteRows,
+      foot: [['Total', '', pEur(data.deductible)]]
+    });
+  }
+
+  // ---------- Présence par pays ----------
   if (data.countries.rows.length) {
-    if (y > 225) { doc.addPage(); y = M; }
-    heading('Présence par pays');
-    doc.autoTable({
-      startY: y,
-      margin: { left: M, right: M },
-      theme: 'striped',
-      headStyles: { fillColor: [38, 48, 62], textColor: 255, fontSize: 9 },
-      styles: { fontSize: 9, cellPadding: 2.2 },
-      columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' } },
-      head: data.courrierOn
-        ? [['Pays', 'Jours de présence', 'Nuits hors domicile', 'Forfait escale']]
-        : [['Pays', 'Jours de présence', 'Nuits hors domicile']],
+    heading('Presence par pays');
+    const head = ['Pays', 'Jours', 'Nuits hors domicile'];
+    if (data.courrierOn) head.push('Forfait escale');
+
+    table({
+      columnStyles: {
+        1: { halign: 'right', cellWidth: 24 },
+        2: { halign: 'right', cellWidth: 34 },
+        3: { halign: 'right', cellWidth: 32 }
+      },
+      head: [head],
       body: data.countries.rows.map(c => {
-        const row = [c.name, String(c.days), String(c.nights)];
+        const row = [c.name, String(c.days), c.nights ? String(c.nights) : '-'];
         if (data.courrierOn) {
           const cr = data.courrier.rows.find(x => x.code === c.code);
-          row.push(cr ? eur(cr.total) : '—');
+          row.push(cr ? pEur(cr.total) : '-');
         }
         return row;
       }),
       foot: [data.courrierOn
-        ? ['Total', String(data.countries.totalDays), String(data.countries.totalNights), eur(data.courrier.gross)]
-        : ['Total', String(data.countries.totalDays), String(data.countries.totalNights)]],
-      didDrawPage: () => {},
-      footStyles: { fillColor: [240, 240, 240], textColor: 20, fontStyle: 'bold' }
+        ? ['Total', String(data.countries.totalDays), String(data.countries.totalNights), pEur(data.courrier.gross)]
+        : ['Total', String(data.countries.totalDays), String(data.countries.totalNights)]]
     });
-    y = doc.lastAutoTable.finalY + 4;
-    doc.setFont('helvetica', 'italic').setFontSize(8).setTextColor(130);
-    doc.text(
-      `${data.countries.awayDays} jours en deplacement, ${data.countries.homeDays} au domicile.`,
-      M, y
+    y -= 3;
+    note(
+      `${data.countries.awayDays} jours en deplacement pour ${data.countries.totalNights} nuits hors domicile, ` +
+      `et ${data.countries.homeDays} jours au domicile. Une nuit passee chez soi n'est pas une nuitee ` +
+      `au sens des frais professionnels : la ligne France ne porte donc aucune nuit.`
     );
-    y += 10;
+    y += 5;
   }
 
-  // Chiffre d'affaires
+  // ---------- Chiffre d'affaires ----------
   if (data.revenueRows.length) {
-    if (y > 225) { doc.addPage(); y = M; }
-    heading('Chiffre d\'affaires Air One Aero');
-    doc.autoTable({
-      startY: y,
-      margin: { left: M, right: M },
-      theme: 'striped',
-      headStyles: { fillColor: [38, 48, 62], textColor: 255, fontSize: 9 },
-      styles: { fontSize: 9, cellPadding: 2.2 },
-      columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' } },
-      head: [['Case', 'Catégorie', 'CA encaissé', 'Après abattement']],
-      body: data.revenueRows.map(r => [r.box || '', r.label, eur(r.total), eur(r.net)]),
-      foot: [['', 'Total', eur(data.turnover), eur(data.netMicro)]],
-      footStyles: { fillColor: [240, 240, 240], textColor: 20, fontStyle: 'bold' }
+    heading("Chiffre d'affaires Air One Aero");
+    table({
+      columnStyles: {
+        0: { cellWidth: 18 },
+        2: { halign: 'right', cellWidth: 34 },
+        3: { halign: 'right', cellWidth: 36 }
+      },
+      head: [['Case', 'Categorie', 'CA encaisse', 'Apres abattement']],
+      body: data.revenueRows.map(r => [r.box || '', r.label, pEur(r.total), pEur(r.net)]),
+      foot: [['', 'Total', pEur(data.turnover), pEur(data.netMicro)]]
     });
-    y = doc.lastAutoTable.finalY + 10;
   }
 
-  // Journal détaillé
-  doc.addPage();
-  y = M;
-  heading('Journal des dépenses');
-  const sorted = [...data.expenses]
+  // ---------- Journal des dépenses ----------
+  const journal = [...data.expenses]
     .filter(e => e.attach !== 'aoa')
     .sort((a, b) => a.date.localeCompare(b.date));
 
-  doc.autoTable({
-    startY: y,
-    margin: { left: M, right: M },
-    theme: 'grid',
-    headStyles: { fillColor: [38, 48, 62], textColor: 255, fontSize: 8 },
-    styles: { fontSize: 7.6, cellPadding: 1.7, lineColor: [220, 220, 220] },
-    columnStyles: {
-      0: { cellWidth: 18 }, 1: { cellWidth: 30 }, 3: { cellWidth: 20 },
-      4: { cellWidth: 22, halign: 'right' }, 5: { cellWidth: 18, halign: 'center' }
-    },
-    head: [['Date', 'Poste', 'Libellé', 'Pays', 'Déductible', 'Pièce']],
-    body: sorted.map((e, i) => [
-      e.date.split('-').reverse().join('/'),
-      CAT_BY_ID[e.category]?.label || e.category,
-      e.label || '—',
-      COUNTRY_BY_CODE[e.country] || '',
-      e.reimbursed ? 'remboursé' : eur(deductibleAmount(e)),
-      e.receiptIds?.length ? `P${String(i + 1).padStart(3, '0')}` : '—'
-    ]),
-    foot: [['', '', '', 'Total', eur(data.deductible), '']],
-    footStyles: { fillColor: [240, 240, 240], textColor: 20, fontStyle: 'bold' }
-  });
+  if (journal.length) {
+    heading('Journal des depenses');
+    table({
+      styles: { ...tableBase.styles, fontSize: 7.6, cellPadding: 1.8 },
+      headStyles: { ...tableBase.headStyles, fontSize: 7.6 },
+      columnStyles: {
+        0: { cellWidth: 18 }, 1: { cellWidth: 30 }, 3: { cellWidth: 22 },
+        4: { cellWidth: 24, halign: 'right' }, 5: { cellWidth: 16, halign: 'center' }
+      },
+      head: [['Date', 'Poste', 'Libelle', 'Pays', 'Deductible', 'Piece']],
+      body: journal.map((e, i) => [
+        e.date.split('-').reverse().join('/'),
+        CAT_BY_ID[e.category]?.label || e.category,
+        e.label || '-',
+        COUNTRY_BY_CODE[e.country] || '',
+        e.reimbursed ? 'rembourse' : pEur(deductibleAmount(e)),
+        e.receiptIds?.length ? `P${String(i + 1).padStart(3, '0')}` : '-'
+      ]),
+      foot: [['', '', '', 'Total', pEur(data.expensesDeductible), '']]
+    });
+  }
 
-  // Pieds de page
+  // ---------- Pieds de page ----------
   const pages = doc.internal.getNumberOfPages();
   for (let p = 1; p <= pages; p++) {
     doc.setPage(p);
-    doc.setFont('helvetica', 'normal').setFontSize(7.5).setTextColor(150);
-    doc.text(
-      `Frais réels ${data.year}${owner ? ' — ' + owner : ''}`,
-      M, doc.internal.pageSize.getHeight() - 8
-    );
-    doc.text(
-      `${p} / ${pages}`,
-      W - M, doc.internal.pageSize.getHeight() - 8, { align: 'right' }
-    );
+    doc.setDrawColor(222, 226, 232).setLineWidth(0.2);
+    doc.line(M, H - 12, W - M, H - 12);
+    doc.setFont('helvetica', 'normal').setFontSize(7.2).setTextColor(150, 155, 162);
+    doc.text(pdfSafe(`Frais reels ${data.year}${owner ? ' - ' + owner : ''}`), M, H - 8);
+    doc.text(`${p} / ${pages}`, W - M, H - 8, { align: 'right' });
   }
 
   return doc.output('blob');
